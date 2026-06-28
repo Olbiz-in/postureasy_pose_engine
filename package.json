@@ -1,0 +1,27 @@
+{
+  "name": "@postureasy/pose-engine",
+  "version": "0.1.0",
+  "description": "Browser pose-tracking engine: MediaPipe Tasks Vision + a scalable exercise registry for real-time form coaching.",
+  "type": "module",
+  "license": "UNLICENSED",
+  "main": "src/index.js",
+  "module": "src/index.js",
+  "exports": {
+    ".": "./src/index.js",
+    "./react": "./src/react/index.js",
+    "./exercises": "./src/exercises/index.js"
+  },
+  "files": [
+    "src"
+  ],
+  "scripts": {
+    "lint": "eslint src"
+  },
+  "dependencies": {
+    "@mediapipe/tasks-vision": "^0.10.22"
+  },
+  "peerDependencies": {
+    "react": ">=18",
+    "react-dom": ">=18"
+  }
+}
