@@ -17,3 +17,20 @@ export {
 
 export { default as LiveExercise } from './react/LiveExercise.jsx';
 export { useLiveExercise } from './react/useLiveExercise.js';
+
+export { VoiceManager } from './core/voiceManager.js';
+
+export {
+  trackingSettings,
+  configureTrackingSettings,
+  subscribeTrackingSettings,
+  getPushUpDepthBand,
+  formatTrackingResult,
+} from './core/trackingSettings.js';
+
+export {
+  SQUAT_TOLERANCE_GROUPS,
+  PUSHUP_TOLERANCE_GROUPS,
+  getSquatToleranceConfig,
+  getPushUpToleranceConfig,
+} from './exercises/toleranceDefinitions.js';

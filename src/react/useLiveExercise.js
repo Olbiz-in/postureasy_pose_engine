@@ -4,6 +4,7 @@
 import { useCallback, useEffect, useRef, useState } from 'react';
 import { createPoseLandmarker } from '../core/poseLandmarker';
 import { drawSkeleton } from '../core/drawSkeleton';
+import { trackingSettings } from '../core/trackingSettings';
 import { resolveExerciseId, getExercise } from '../core/registry';
 
 const IDLE_STATE = {
@@ -82,7 +83,7 @@ export function useLiveExercise({
 
     let cancelled = false;
     const def = getExercise(exerciseId);
-    trackerRef.current = def.create();
+    trackerRef.current = def.create({ voice });
     setState(IDLE_STATE);
     lastRepRef.current = 0;
     setStatus('loading');
@@ -173,28 +174,42 @@ export function useLiveExercise({
         }
 
         const frame = { width: canvas.width, height: canvas.height, timestamp: ts };
-        const next = tracker.update(landmarks, frame);
-
         const ctx = canvas.getContext('2d');
+
+        let next = null;
+        try {
+          next = tracker.update(landmarks, frame);
+        } catch (err) {
+          console.error('[useLiveExercise] tracker.update failed:', err);
+          next = { repCount: lastRepRef.current, cues: [{ level: 'warn', text: 'Tracking error — retrying…' }] };
+        }
+
         ctx.clearRect(0, 0, canvas.width, canvas.height);
-        if (landmarks) {
+        if (landmarks && next) {
           drawSkeleton(ctx, landmarks, {
             width: canvas.width,
             height: canvas.height,
             color: next.skeletonColor || '#22d3a6',
+            lineWidth: trackingSettings.skeletonLineWidth,
+            jointRadius: trackingSettings.skeletonJointRadius,
           });
         }
-        if (typeof tracker.draw === 'function') tracker.draw(ctx, landmarks, frame, next);
+        if (next && typeof tracker.draw === 'function') {
+          try {
+            tracker.draw(ctx, landmarks, frame, next);
+          } catch (err) {
+            console.error('[useLiveExercise] tracker.draw failed:', err);
+          }
+        }
 
-        if (next.repCount !== lastRepRef.current) {
+        if (next?.repCount !== lastRepRef.current) {
           lastRepRef.current = next.repCount;
           onRepCountChangeRef.current?.(next.repCount);
         }
-        if (next.repEvent) onRepCompleteRef.current?.(next.repEvent);
-        if (next.feedback && voice) speak(next.feedback);
+        if (next?.repEvent) onRepCompleteRef.current?.(next.repEvent);
 
         const now = performance.now();
-        if (now - lastUiAtRef.current >= 1000 / uiHz) {
+        if (next && now - lastUiAtRef.current >= 1000 / uiHz) {
           lastUiAtRef.current = now;
           setState(next);
           onStateChangeRef.current?.(next);
@@ -206,6 +221,7 @@ export function useLiveExercise({
     init();
     return () => {
       cancelled = true;
+      try { trackerRef.current?.reset?.(); } catch { /* noop */ }
       stop();
     };
   }, [active, exerciseId, voice, uiHz, stop]);

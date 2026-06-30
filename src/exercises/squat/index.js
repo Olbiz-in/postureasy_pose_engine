@@ -1,166 +1,76 @@
-// Squat exercise definition — implements the engine's ExerciseDefinition/Tracker
-// contract on top of the proven SquatRepTracker + knee-form monitor.
+// Squat (front view) — delegates to SquatFlow (full fitness_posture state machine + voice).
 
-import { LM, midpoint, shoulderWidth, isVisible } from '../../core/landmarks';
-import { drawHLine } from '../../core/drawSkeleton';
-import { SquatRepTracker } from './SquatRepTracker';
-import { KneeAngleRepMonitor } from './kneeMonitor';
+import { LM, midpoint, shoulderWidth } from '../../core/landmarks';
+import { formatTrackingResult } from '../../core/trackingSettings';
+import { SquatFlow, PHASE } from './SquatFlow';
+import {
+  drawStandingGuideBox,
+  drawAllStanceToleranceGuides,
+  drawSquatRepOverlay,
+  drawTempoGateOverlay,
+} from './draw';
 
-const REQUIRED = [LM.LEFT_HIP, LM.RIGHT_HIP, LM.LEFT_KNEE, LM.RIGHT_KNEE, LM.LEFT_SHOULDER, LM.RIGHT_SHOULDER];
-
-const SPEED_CUE_TEXT = {
-  rep_fast: 'Slow down — aim for 2–4s per rep',
-  rep_slow: 'Pick up the pace — push with power',
-  descend_fast: 'Lower more slowly',
-  ascend_fast: 'Control the way up',
-  ascend_slow: 'Drive up with more power',
-  descend_slow: 'Descend a bit faster',
-};
-
-const FORM_COLORS = {
-  ok: 'rgb(34,211,166)',
-  info: 'rgb(34,211,166)',
-  warn: 'rgb(245,158,11)',
-  bad: 'rgb(239,68,68)',
-};
-
-function createSquatTracker() {
-  const rep = new SquatRepTracker();
-  const knee = new KneeAngleRepMonitor();
-
-  let formScore = 100;
-  let lastInSquat = false;
-  let pendingFeedback = null;
-
-  function applyRepPenalty(metrics, kneeMsg) {
-    let penalty = 0;
-    if (!metrics.full_depth) penalty += 8;
-    if (metrics.too_deep) penalty += 5;
-    if (metrics.left_right_asym > SquatRepTracker.MAX_LR_ASYM_FRAC * 0.8) penalty += 6;
-    if (!['ok', 'pace_perfect'].includes(metrics.speed_cue)) penalty += 5;
-    if (kneeMsg) penalty += 8;
-    // Reward clean reps by letting the score recover gradually.
-    formScore = Math.max(0, Math.min(100, formScore - penalty + (penalty === 0 ? 4 : 0)));
-  }
+function createSquatTracker(options = {}) {
+  const flow = new SquatFlow(options);
+  let lastRep = 0;
+  let lastFr = null;
 
   return {
     reset() {
-      rep.reset();
-      knee.resetAll();
-      formScore = 100;
-      lastInSquat = false;
-      pendingFeedback = null;
+      flow.reset();
+      lastRep = 0;
+      lastFr = null;
     },
 
-    update(landmarks) {
-      if (!landmarks || !REQUIRED.every((i) => isVisible(landmarks[i]))) {
-        return {
-          repCount: rep.count,
-          phase: 'idle',
-          progress: 0,
-          formScore: Math.round(formScore),
-          ready: false,
-          cues: [{ level: 'info', text: 'Step back so your full body is visible' }],
-          feedback: null,
-        };
-      }
+    update(landmarks, frame) {
+      lastFr = flow.tick(landmarks, frame.width, frame.height);
+      const state = flow.toTrackerState(lastFr);
 
-      const hip = midpoint(landmarks[LM.LEFT_HIP], landmarks[LM.RIGHT_HIP]);
-      const kneeMid = midpoint(landmarks[LM.LEFT_KNEE], landmarks[LM.RIGHT_KNEE]);
-      const ankleMid = midpoint(landmarks[LM.LEFT_ANKLE], landmarks[LM.RIGHT_ANKLE]);
-      const sw = shoulderWidth(landmarks);
-      const leftGap = landmarks[LM.LEFT_KNEE].y - landmarks[LM.LEFT_HIP].y;
-      const rightGap = landmarks[LM.RIGHT_KNEE].y - landmarks[LM.RIGHT_HIP].y;
-
-      const completed = rep.update(hip.y, kneeMid.y, ankleMid ? ankleMid.y : null, sw, leftGap, rightGap);
-
-      // Drive the knee monitor across the rep lifecycle.
-      if (rep.inSquat && !lastInSquat) knee.onRepStart();
-      if (rep.inSquat) knee.updateFrame(landmarks);
-      lastInSquat = rep.inSquat;
-
-      let feedback = null;
-      let repEvent = null;
-      if (completed) {
-        const kneeMsg = knee.consumeEndOfRepFeedback();
-        applyRepPenalty(completed, kneeMsg);
-        feedback = kneeMsg
-          || (!completed.full_depth ? 'Go a little deeper for a full rep' : null)
-          || (SPEED_CUE_TEXT[completed.speed_cue] || null)
-          || `Rep ${completed.rep_index} — nice work!`;
-        pendingFeedback = feedback;
-
-        const errors = [];
-        let errorKey = null;
-        if (kneeMsg) { errors.push('knee_alignment'); errorKey = errorKey || 'knee_alignment'; }
-        if (!completed.full_depth) { errors.push('squat_go_deeper'); errorKey = errorKey || 'squat_go_deeper'; }
-        if (completed.too_deep) { errors.push('squat_too_deep'); errorKey = errorKey || 'squat_too_deep'; }
-        if (!['ok', 'pace_perfect'].includes(completed.speed_cue)) {
-          errors.push(completed.speed_cue);
-          errorKey = errorKey || completed.speed_cue;
-        }
-        repEvent = {
-          index: completed.rep_index,
-          durationSec: completed.total_rep_sec,
-          activeSec: completed.active_time_sec,
-          errorKey,
-          error: kneeMsg
-            ? 'Knee alignment'
-            : !completed.full_depth
-              ? 'Partial depth'
-              : completed.too_deep
-                ? 'Too deep'
-                : errorKey
-                  ? (SPEED_CUE_TEXT[errorKey] || 'Tempo')
-                  : null,
+      if (state.repCount > lastRep) {
+        lastRep = state.repCount;
+        const metrics = lastFr.squatTracker?.repMetrics?.at(-1);
+        const errors = metrics?.voice_keys || [];
+        state.repEvent = {
+          index: lastRep,
+          durationSec: metrics?.total_rep_sec ?? null,
+          activeSec: metrics?.active_time_sec ?? null,
+          errorKey: errors[0] || null,
+          error: lastFr.activeFeedback || null,
           errors,
-          good: errors.length === 0,
-          metric: completed.peak_depth_pct,
-          speedCue: completed.speed_cue,
+          good: errors.length === 0 && !lastFr.activeFeedback,
+          metric: metrics?.peak_depth_pct ?? null,
+          speedCue: metrics?.speed_cue ?? null,
         };
       }
 
-      // Live cues
-      const cues = [];
-      if (!rep.isCalibrated) {
-        cues.push({ level: 'info', text: `Stand tall to calibrate (${rep.calibrationPct}%)` });
-      } else if (rep.tooDeep) {
-        cues.push({ level: 'warn', text: 'Too deep — rise up slightly' });
-      } else if (rep.inSquat && knee.hasActiveFlag()) {
-        cues.push({ level: 'warn', text: 'Track knees over your toes' });
-      } else if (rep.inSquat) {
-        cues.push({ level: rep.reachedFull ? 'ok' : 'info', text: rep.reachedFull ? 'Good depth — drive up' : 'Keep lowering' });
-      } else {
-        cues.push({ level: 'ok', text: 'Ready — begin your squat' });
-      }
-
-      const topLevel = cues[0]?.level || 'ok';
-      return {
-        repCount: rep.count,
-        phase: rep.inSquat ? 'down' : 'up',
-        progress: rep.depthPct,
-        formScore: Math.round(formScore),
-        ready: rep.isCalibrated,
-        cues,
-        feedback,
-        repEvent,
-        skeletonColor: FORM_COLORS[topLevel] || FORM_COLORS.ok,
-      };
+      state.tracking = formatTrackingResult(state);
+      return state;
     },
 
     draw(ctx, landmarks, frame) {
-      if (rep.fixedStartLineY != null) {
-        drawHLine(ctx, rep.fixedStartLineY, {
-          width: frame.width,
-          height: frame.height,
-          color: 'rgba(34, 211, 166, 0.55)',
-          label: 'Start line',
-        });
-      }
-    },
+      if (!landmarks || !lastFr) return;
 
-    get lastFeedback() {
-      return pendingFeedback;
+      if (lastFr.drawGuideBox) {
+        drawStandingGuideBox(ctx, frame.width, frame.height);
+      }
+
+      // Show tolerance rails during stance setup and active exercise (not only mid-rep).
+      if (lastFr.stanceData) {
+        const sustained = new Set(lastFr.stanceData.allCues || []);
+        drawAllStanceToleranceGuides(
+          ctx, landmarks, lastFr.stanceData, frame.width, frame.height, sustained,
+        );
+      }
+
+      if (lastFr.squatTracker && lastFr.phase === PHASE.EXERCISE_ACTIVE) {
+        const hip = midpoint(landmarks[LM.LEFT_HIP], landmarks[LM.RIGHT_HIP]);
+        const kneeMid = midpoint(landmarks[LM.LEFT_KNEE], landmarks[LM.RIGHT_KNEE]);
+        const sw = shoulderWidth(landmarks);
+        drawSquatRepOverlay(
+          ctx, lastFr.squatTracker, hip.x, hip.y, kneeMid.x, kneeMid.y, sw, frame.width, frame.height,
+        );
+        drawTempoGateOverlay(ctx, lastFr.squatTracker, frame.width, frame.height);
+      }
     },
   };
 }
@@ -170,6 +80,9 @@ export default {
   name: 'Squat',
   family: 'squat',
   facing: 'front',
-  aliases: ['squat', 'squats', 'bodyweight squat', 'bodyweight squats', 'air squat', 'air squats', 'goblet squat'],
+  aliases: [
+    'squat', 'squats', 'bodyweight squat', 'bodyweight squats',
+    'air squat', 'air squats', 'goblet squat', 'walking lunges',
+  ],
   create: createSquatTracker,
 };

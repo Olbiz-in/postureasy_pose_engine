@@ -82,3 +82,32 @@ export const FORM_COLORS = {
   yellow: 'rgb(245,158,11)',
   red: 'rgb(239,68,68)',
 };
+
+export const PUSHUP_VOICE_MSG = {
+  no_person: 'No person detected.',
+  upper_body_ok: 'Upper body visible. Get into push-up position when ready.',
+  ready_to_start: 'Starting push-up exercise. Do rep one.',
+  done: 'Congratulations. You finished every rep.',
+  wrist_left_inner: 'Move your left wrist inward.',
+  wrist_left_outer: 'Move your left wrist outward.',
+  wrist_right_inner: 'Move your right wrist inward.',
+  wrist_right_outer: 'Move your right wrist outward.',
+  elbow_left_inner: 'Bring your left elbow in closer.',
+  elbow_left_outer: 'Flare your left elbow outward.',
+  elbow_right_inner: 'Bring your right elbow in closer.',
+  elbow_right_outer: 'Flare your right elbow outward.',
+  forearm_left: 'Keep your left forearm straight.',
+  forearm_right: 'Keep your right forearm straight.',
+  hand_left_inner: 'Rotate your left hand inward.',
+  hand_left_outer: 'Rotate your left hand outward.',
+  hand_right_inner: 'Rotate your right hand inward.',
+  hand_right_outer: 'Rotate your right hand outward.',
+  pushup_too_deep: 'Too deep! Rise up slightly.',
+  pushup_shoulder_deep: 'Shoulders too low. Come up a little.',
+};
+
+export const PUSHUP_COLOR_GREEN = 'rgb(0,255,0)';
+export const PUSHUP_COLOR_YELLOW = 'rgb(255,200,0)';
+export const PUSHUP_COLOR_RED = 'rgb(255,0,0)';
+export const PUSHUP_COLOR_AMBER = 'rgb(255,190,0)';
+export const PUSHUP_COLOR_CYAN = 'rgb(0,220,255)';

@@ -3,6 +3,7 @@
 // MediaPipe normalized coordinates.
 
 import { LM, nowSec } from '../../core/landmarks';
+import { getPushUpDepthBand } from '../../core/trackingSettings';
 import {
   PUSHUP_CFG,
   PUSHUP_DOWN_THRESHOLD,
@@ -156,9 +157,10 @@ export function checkShoulderLineTooDeep(landmarks, pushupState) {
 }
 
 export function checkPushUpDepth(elbowAngle, pushupState, landmarks) {
+  const band = getPushUpDepthBand();
   if (pushupState !== 'DOWN') return { ok: true, near: false, cueKeys: [], label: 'GOOD FORM', colorKey: 'green' };
-  const tooDeepAngle = elbowAngle < PUSHUP_CFG.depth_too_deep_threshold;
-  const inRange = PUSHUP_CFG.depth_target_min <= elbowAngle && elbowAngle <= PUSHUP_CFG.depth_target_max;
+  const tooDeepAngle = elbowAngle < band.tooDeep;
+  const inRange = band.min <= elbowAngle && elbowAngle <= band.max;
   let shoulderTouching = false;
   let shoulderNear = false;
   const shoulderCues = [];
@@ -173,8 +175,8 @@ export function checkPushUpDepth(elbowAngle, pushupState, landmarks) {
   cues.push(...shoulderCues);
   if (tooDeep) return { ok: false, near: false, cueKeys: cues, label: 'TOO DEEP', colorKey: 'red' };
   if (inRange && !shoulderNear) return { ok: true, near: false, cueKeys: [], label: 'GOOD FORM', colorKey: 'green' };
-  if (elbowAngle > PUSHUP_CFG.depth_target_max) return { ok: true, near: true, cueKeys: [], label: 'GOOD FORM', colorKey: 'yellow' };
-  const near = elbowAngle < PUSHUP_CFG.depth_target_min || shoulderNear;
+  if (elbowAngle > band.max) return { ok: true, near: true, cueKeys: [], label: 'GOOD FORM', colorKey: 'yellow' };
+  const near = elbowAngle < band.min || shoulderNear;
   return { ok: true, near, cueKeys: [], label: 'GOOD FORM', colorKey: near ? 'yellow' : 'green' };
 }
 

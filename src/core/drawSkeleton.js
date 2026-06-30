@@ -6,8 +6,10 @@ import { POSE_CONNECTIONS } from './poseLandmarker';
  * Draw the pose skeleton (bones + joints) onto a 2D canvas context.
  * Landmarks are normalized (0..1); `width`/`height` are the canvas pixel size.
  */
-export function drawSkeleton(ctx, landmarks, { width, height, color = '#22d3a6', jointColor = '#ffffff', lineWidth = 4, minVisibility = 0.5 } = {}) {
+export function drawSkeleton(ctx, landmarks, { width, height, color = '#22d3a6', jointColor = '#ffffff', lineWidth = 2, jointRadius, minVisibility = 0.5 } = {}) {
   if (!landmarks || !landmarks.length) return;
+
+  const r = jointRadius ?? Math.max(3, lineWidth);
 
   ctx.save();
   ctx.lineWidth = lineWidth;
@@ -25,11 +27,11 @@ export function drawSkeleton(ctx, landmarks, { width, height, color = '#22d3a6',
   }
 
   ctx.fillStyle = jointColor;
-  const r = Math.max(3, lineWidth);
+  const dotR = r;
   for (const lm of landmarks) {
     if ((lm.visibility ?? 1) < minVisibility) continue;
     ctx.beginPath();
-    ctx.arc(lm.x * width, lm.y * height, r, 0, Math.PI * 2);
+    ctx.arc(lm.x * width, lm.y * height, dotR, 0, Math.PI * 2);
     ctx.fill();
   }
 
