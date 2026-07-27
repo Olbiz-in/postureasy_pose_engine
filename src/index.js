@@ -18,7 +18,7 @@ export {
 export { default as LiveExercise } from './react/LiveExercise.jsx';
 export { useLiveExercise } from './react/useLiveExercise.js';
 
-export { VoiceManager } from './core/voiceManager.js';
+export { VoiceManager, configureVoiceManager } from './core/voiceManager.js';
 
 export {
   trackingSettings,
