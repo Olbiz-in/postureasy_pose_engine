@@ -51,6 +51,8 @@ export const SUSTAIN_SEC = 1.0;
 
 /** Default ratio-based tolerance values (mutable at runtime via tolerance UI). */
 export const CFG_DEFAULTS = {
+  // Stance-phase only: |ankleWidth - shoulderWidth| / shoulderWidth must be ≤ this.
+  shoulder_ankle_tolerance: 0.20,
   shoulder_foot_align_ratio_max: 0.100,
   sf_left_inner_offset_ratio: 0.04,
   sf_left_outer_offset_ratio: 0.04,
@@ -106,6 +108,13 @@ export const CFG_DEFAULTS = {
 
 /** Live mutable config — tolerance sliders write here directly. */
 export const CFG = { ...CFG_DEFAULTS };
+
+/** Configurable stance-phase ankle↔shoulder width tolerance (reads live CFG). */
+export function getShoulderAnkleTolerance() {
+  return CFG.shoulder_ankle_tolerance;
+}
+// Alias matching the requested constant name; value is always live from CFG.
+export const SHOULDER_ANKLE_TOLERANCE = CFG_DEFAULTS.shoulder_ankle_tolerance;
 
 export const MIRROR_VIEW = true;
 

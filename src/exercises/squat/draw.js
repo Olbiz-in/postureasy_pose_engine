@@ -383,7 +383,83 @@ export function drawShoulderLevelGuides(ctx, lsX, lsY, rsX, rsY, swN, dyRatio, w
 }
 
 // ---------------------------------------------------------------------------
-// drawAllStanceToleranceGuides — combined
+// drawStanceAnkleWidthGuides — STANCE_CHECK only
+// Visualizes ankle width vs shoulder width with a tolerance band.
+// ---------------------------------------------------------------------------
+export function drawStanceAnkleWidthGuides(ctx, stanceData, w, h) {
+  if (!stanceData || stanceData.stanceMode !== 'width') return;
+  const { ls, rs, la, ra, shoulderWidth, ankleWidth, ok, tolerance } = stanceData;
+  if (!ls || !rs || !la || !ra) return;
+  if (Math.min(ls.visibility ?? 1, rs.visibility ?? 1, la.visibility ?? 1, ra.visibility ?? 1) < 0.2) {
+    return;
+  }
+
+  const sw = Math.max(shoulderWidth, 1e-6);
+  const lx = clamp(Math.round(la.x * w), 0, w - 1);
+  const rx = clamp(Math.round(ra.x * w), 0, w - 1);
+  const ay = clamp(Math.round(((la.y + ra.y) * 0.5) * h), 0, h - 1);
+
+  // Width-only overlay: target span = shoulder width ± tol, centered on ankles
+  const midX = Math.round((lx + rx) * 0.5);
+  const targetHalf = (sw * 0.5) * w;
+  const tolPx = Math.max(2, Math.round(tolerance * sw * w));
+  const bandLo = clamp(Math.round(midX - targetHalf - tolPx), 0, w - 1);
+  const bandHi = clamp(Math.round(midX + targetHalf + tolPx), 0, w - 1);
+  const targetLo = clamp(Math.round(midX - targetHalf), 0, w - 1);
+  const targetHi = clamp(Math.round(midX + targetHalf), 0, w - 1);
+
+  const halfLen = Math.max(10, Math.round(0.035 * h));
+  const y0 = Math.max(0, ay - halfLen);
+  const y1 = Math.min(h - 1, ay + halfLen);
+  const mainCol = ok ? 'rgb(0,255,0)' : 'rgb(255,140,0)';
+
+  ctx.save();
+
+  // Tolerance outer rails (cyan) and ideal shoulder-width rails (white)
+  ctx.lineWidth = 2;
+  ctx.strokeStyle = 'rgb(0,200,255)';
+  _line(ctx, bandLo, y0, bandLo, y1);
+  _line(ctx, bandHi, y0, bandHi, y1);
+  ctx.strokeStyle = 'rgba(255,255,255,0.7)';
+  ctx.lineWidth = 1;
+  _line(ctx, targetLo, y0, targetLo, y1);
+  _line(ctx, targetHi, y0, targetHi, y1);
+
+  // Current ankle span
+  ctx.strokeStyle = mainCol;
+  ctx.lineWidth = 3;
+  _line(ctx, lx, ay, rx, ay);
+
+  // Ankle markers
+  ctx.fillStyle = mainCol;
+  ctx.beginPath(); ctx.arc(lx, ay, 7, 0, Math.PI * 2); ctx.fill();
+  ctx.beginPath(); ctx.arc(rx, ay, 7, 0, Math.PI * 2); ctx.fill();
+  ctx.strokeStyle = 'rgb(255,255,255)';
+  ctx.lineWidth = 1.5;
+  ctx.beginPath(); ctx.arc(lx, ay, 7, 0, Math.PI * 2); ctx.stroke();
+  ctx.beginPath(); ctx.arc(rx, ay, 7, 0, Math.PI * 2); ctx.stroke();
+
+  // Optional shoulder reference width (debug)
+  const slx = clamp(Math.round(ls.x * w), 0, w - 1);
+  const srx = clamp(Math.round(rs.x * w), 0, w - 1);
+  const sy = clamp(Math.round(((ls.y + rs.y) * 0.5) * h), 0, h - 1);
+  ctx.strokeStyle = 'rgba(180,180,255,0.85)';
+  ctx.lineWidth = 2;
+  _line(ctx, slx, sy, srx, sy);
+  ctx.fillStyle = 'rgba(180,180,255,0.9)';
+  ctx.beginPath(); ctx.arc(slx, sy, 4, 0, Math.PI * 2); ctx.fill();
+  ctx.beginPath(); ctx.arc(srx, sy, 4, 0, Math.PI * 2); ctx.fill();
+
+  ctx.fillStyle = mainCol;
+  ctx.font = '12px monospace';
+  const pct = ((ankleWidth / sw) * 100).toFixed(0);
+  ctx.fillText(`Stance ${pct}% shoulder width`, Math.max(8, midX - 90), Math.max(16, ay - halfLen - 8));
+
+  ctx.restore();
+}
+
+// ---------------------------------------------------------------------------
+// drawAllStanceToleranceGuides — combined (exercise-phase form overlays)
 // ---------------------------------------------------------------------------
 export function drawAllStanceToleranceGuides(ctx, landmarks, stanceData, w, h, sustainedCues) {
   const { hip, torso, shlvl, kneeX, kneeY } = stanceData;

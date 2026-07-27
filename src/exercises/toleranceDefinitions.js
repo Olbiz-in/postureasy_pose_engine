@@ -14,6 +14,20 @@ export const PUSHUP_CFG_DEFAULTS = {
 
 export const SQUAT_TOLERANCE_GROUPS = [
   {
+    title: 'Stance Width',
+    color: '#56cf7b',
+    keys: ['shoulder_ankle_tolerance'],
+    sliders: [
+      {
+        key: 'shoulder_ankle_tolerance',
+        label: 'Ankle vs shoulder width',
+        min: 0.05,
+        max: 0.45,
+        step: 0.01,
+      },
+    ],
+  },
+  {
     title: 'Knee Alignment',
     color: '#4ecdc4',
     keys: ['knee_align_ratio_max', 'kn_left_inner_offset_ratio', 'kn_left_outer_offset_ratio', 'kn_right_inner_offset_ratio', 'kn_right_outer_offset_ratio'],
@@ -26,7 +40,7 @@ export const SQUAT_TOLERANCE_GROUPS = [
     ],
   },
   {
-    title: 'Ankle / Foot',
+    title: 'Ankle / Foot (exercise form)',
     color: '#56cf7b',
     keys: ['shoulder_foot_align_ratio_max', 'foot_index_align_ratio_max'],
     sliders: [

@@ -357,7 +357,7 @@ export class SquatSideFlow {
 
         const lastRep = sq.repMetrics[sq.repMetrics.length - 1];
         if (lastRep && !lastRep.full_depth) {
-          this._speak(VOICE_MSG.too_early, { key: 'side_too_early', cooldownMs: VOICE_CD_MS });
+          this._speakQueued(VOICE_MSG.too_early, { key: 'side_too_early' });
           this._activeFeedback = VOICE_MSG.too_early;
         }
 
@@ -386,7 +386,7 @@ export class SquatSideFlow {
         const torsoMsg = torsoMon.consumeEndOfRepFeedback();
         const warning = selectRepPostureWarning({ speedKey, kneeMsg, torsoMsg });
         if (warning) {
-          this._speak(warning.text, { key: 'side_' + warning.key, cooldownMs: VOICE_CD_MS });
+          this._speakQueued(warning.text, { key: 'side_' + warning.key });
           this._activeFeedback = warning.text;
         }
 

@@ -49,12 +49,14 @@ export class VoiceManager {
     this._cooldowns = {};
     this._queue = [];
     this._isQueuedSpeaking = false;
+    this._isDirectSpeaking = false;
     this._adapter = createVoiceAdapter();
   }
 
   _playNextQueued() {
     if (!this._adapter?.isAvailable?.()) return;
-    if (this._isQueuedSpeaking) return;
+    if (this._isQueuedSpeaking || this._isDirectSpeaking) return;
+    if (this._adapter.isSpeaking()) return;
     const next = this._queue.shift();
     if (!next) return;
     this._isQueuedSpeaking = true;
@@ -73,14 +75,40 @@ export class VoiceManager {
     const now = Date.now();
     const last = this._cooldowns[k] || 0;
     if (cooldownMs > 0 && now - last < cooldownMs) return false;
-    if (!immediate && this._adapter.isSpeaking()) return false;
     this._cooldowns[k] = now;
+
     if (immediate) {
       this._queue = [];
       this._isQueuedSpeaking = false;
+      this._isDirectSpeaking = false;
       this._adapter.cancel();
+      this._isDirectSpeaking = true;
+      const started = this._adapter.speak(text, {
+        onEnd: () => {
+          this._isDirectSpeaking = false;
+          this._playNextQueued();
+        },
+      });
+      if (!started) this._isDirectSpeaking = false;
+      return started;
     }
-    return this._adapter.speak(text);
+
+    // Serialize behind any in-flight or queued speech.
+    if (this._isDirectSpeaking || this._isQueuedSpeaking || this._adapter.isSpeaking() || this._queue.length > 0) {
+      this._queue.push(text);
+      this._playNextQueued();
+      return true;
+    }
+
+    this._isDirectSpeaking = true;
+    const started = this._adapter.speak(text, {
+      onEnd: () => {
+        this._isDirectSpeaking = false;
+        this._playNextQueued();
+      },
+    });
+    if (!started) this._isDirectSpeaking = false;
+    return started;
   }
 
   speakQueued(text, { key, cooldownMs = 0 } = {}) {
@@ -99,6 +127,7 @@ export class VoiceManager {
     if (!this._adapter?.isAvailable?.()) return;
     this._queue = [];
     this._isQueuedSpeaking = false;
+    this._isDirectSpeaking = false;
     this._adapter.cancel();
   }
 
@@ -108,6 +137,6 @@ export class VoiceManager {
 
   isBusy() {
     if (!this._adapter?.isAvailable?.()) return false;
-    return this._isQueuedSpeaking || this._queue.length > 0 || this._adapter.isSpeaking();
+    return this._isDirectSpeaking || this._isQueuedSpeaking || this._queue.length > 0 || this._adapter.isSpeaking();
   }
 }

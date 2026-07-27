@@ -5,6 +5,7 @@ import { formatTrackingResult } from '../../core/trackingSettings';
 import { SquatFlow, PHASE } from './SquatFlow';
 import {
   drawStandingGuideBox,
+  drawStanceAnkleWidthGuides,
   drawAllStanceToleranceGuides,
   drawSquatRepOverlay,
   drawTempoGateOverlay,
@@ -54,8 +55,16 @@ function createSquatTracker(options = {}) {
         drawStandingGuideBox(ctx, frame.width, frame.height);
       }
 
-      // Show tolerance rails during stance setup and active exercise (not only mid-rep).
-      if (lastFr.stanceData) {
+      // STANCE_CHECK: only ankle↔shoulder width overlay (no knee/heel/torso guides)
+      if (lastFr.phase === PHASE.STANCE_CHECK && lastFr.stanceData?.stanceMode === 'width') {
+        drawStanceAnkleWidthGuides(ctx, lastFr.stanceData, frame.width, frame.height);
+      }
+      // Exercise / ready overlays keep the existing multi-guide form visualization
+      else if (
+        lastFr.stanceData &&
+        lastFr.stanceData.stanceMode !== 'width' &&
+        (lastFr.phase === PHASE.EXERCISE_ACTIVE || lastFr.phase === PHASE.READY_TO_START || lastFr.phase === PHASE.DONE)
+      ) {
         const sustained = new Set(lastFr.stanceData.allCues || []);
         drawAllStanceToleranceGuides(
           ctx, landmarks, lastFr.stanceData, frame.width, frame.height, sustained,

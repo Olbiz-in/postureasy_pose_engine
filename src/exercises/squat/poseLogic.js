@@ -280,7 +280,73 @@ export function getTorsoCalibration() {
 }
 
 // ---------------------------------------------------------------------------
+// Stance-phase ONLY: ankle width ≈ shoulder width
+// (Exercise-phase form checks below are unchanged.)
+// ---------------------------------------------------------------------------
+
+/**
+ * Compare ankle stance width to shoulder width.
+ * This is the sole validation rule used during STANCE_CHECK.
+ *
+ * @returns {{
+ *   ok: boolean,
+ *   status: 'ok'|'narrow'|'wide',
+ *   feedback: string,
+ *   shoulderWidth: number,
+ *   ankleWidth: number,
+ *   ratio: number,
+ *   tolerance: number,
+ *   ls: object, rs: object, la: object, ra: object,
+ *   allCues: string[],
+ *   checkOk: object,
+ *   skelOk: boolean,
+ *   stanceMode: 'width',
+ * }}
+ */
+export function checkShoulderAnkleWidth(landmarks) {
+  const ls = landmarks[LM.LEFT_SHOULDER];
+  const rs = landmarks[LM.RIGHT_SHOULDER];
+  const la = landmarks[LM.LEFT_ANKLE];
+  const ra = landmarks[LM.RIGHT_ANKLE];
+
+  const shoulderWidth = Math.max(Math.abs(ls.x - rs.x), 1e-6);
+  const ankleWidth = Math.abs(la.x - ra.x);
+  const ratio = ankleWidth / shoulderWidth;
+  const tolerance = CFG.shoulder_ankle_tolerance;
+
+  let status = 'ok';
+  let feedback = 'Great! Your stance looks good.';
+  let ok = true;
+
+  if (ratio < 1 - tolerance) {
+    status = 'narrow';
+    feedback = 'Please spread your feet slightly.';
+    ok = false;
+  } else if (ratio > 1 + tolerance) {
+    status = 'wide';
+    feedback = 'Please bring your feet closer together.';
+    ok = false;
+  }
+
+  return {
+    ok,
+    status,
+    feedback,
+    shoulderWidth,
+    ankleWidth,
+    ratio,
+    tolerance,
+    ls, rs, la, ra,
+    allCues: ok ? [] : [status === 'narrow' ? 'stance_narrow' : 'stance_wide'],
+    checkOk: { shoulder_ankle_width: ok },
+    skelOk: ok,
+    stanceMode: 'width',
+  };
+}
+
+// ---------------------------------------------------------------------------
 // Stance checks (from Python check_shoulder_foot_vertical etc.)
+// Used during EXERCISE_ACTIVE form monitoring — not for STANCE_CHECK.
 // ---------------------------------------------------------------------------
 
 export function checkShoulderFootVertical(landmarks) {
