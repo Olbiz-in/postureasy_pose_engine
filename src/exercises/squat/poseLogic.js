@@ -8,7 +8,7 @@ import {
   FEET_LANDMARKS, KNEE_LANDMARKS, LEFT_SIDE, RIGHT_SIDE,
   MSG_HEAD, MSG_LEGS, MSG_FEET, MSG_TOO_CLOSE, MSG_TOO_FAR,
   MSG_SIDE_VIEW, MSG_POOR_DETECTION,
-  cueForView, viewSide,
+  cueForView,
 } from './config.js';
 
 // ---------------------------------------------------------------------------
@@ -128,6 +128,56 @@ export function validatePoseForAnalysis(landmarks, skipSideView = false) {
     missingIds, gateHead, gateUpper, gateLower, landmarks, visMin, margin, skipSideView
   );
   return { ready: false, message, kind, gateHead, gateUpper, gateLower };
+}
+
+// ---------------------------------------------------------------------------
+// Global full-body visibility gate for the entire squat pipeline
+// ---------------------------------------------------------------------------
+const REQUIRED_FULL_BODY_IDS = [
+  LM.NOSE,
+  LM.LEFT_HIP, LM.RIGHT_HIP,
+  LM.LEFT_KNEE, LM.RIGHT_KNEE,
+  LM.LEFT_ANKLE, LM.RIGHT_ANKLE,
+  LM.LEFT_FOOT_INDEX, LM.RIGHT_FOOT_INDEX,
+];
+
+export function validateFullBodyVisibility(landmarks) {
+  if (!landmarks) {
+    return {
+      ready: false,
+      kind: 'body_not_visible',
+      message: 'Please ensure your full body is visible.',
+      missingIds: new Set(REQUIRED_FULL_BODY_IDS),
+    };
+  }
+
+  const visMin = CFG.keypoint_vis_min;
+  const margin = CFG.keypoint_frame_margin;
+  const missingIds = new Set();
+
+  for (const id of REQUIRED_FULL_BODY_IDS) {
+    const strictBottom = id === LM.LEFT_FOOT_INDEX || id === LM.RIGHT_FOOT_INDEX;
+    const bottom = strictBottom ? CFG.keypoint_bottom_margin : null;
+    if (!landmarkConfident(landmarks[id], visMin, margin, bottom)) {
+      missingIds.add(id);
+    }
+  }
+
+  if (missingIds.size === 0) {
+    return { ready: true, kind: 'ok', message: '', missingIds };
+  }
+
+  const missingHead = missingIds.has(LM.NOSE);
+  const missingLeg =
+    missingIds.has(LM.LEFT_KNEE) || missingIds.has(LM.RIGHT_KNEE) ||
+    missingIds.has(LM.LEFT_ANKLE) || missingIds.has(LM.RIGHT_ANKLE) ||
+    missingIds.has(LM.LEFT_FOOT_INDEX) || missingIds.has(LM.RIGHT_FOOT_INDEX);
+
+  let message = 'Please ensure your full body is visible.';
+  if (missingHead && missingLeg) message = 'Your head and both legs must be visible.';
+  else if (missingHead || missingLeg) message = 'Move back so your entire body is in the frame.';
+
+  return { ready: false, kind: 'body_not_visible', message, missingIds };
 }
 
 // ---------------------------------------------------------------------------
@@ -286,7 +336,7 @@ export function getTorsoCalibration() {
 
 /**
  * Compare ankle stance width to shoulder width.
- * This is the sole validation rule used during STANCE_CHECK.
+ * First stance-validation rule (foot width).
  *
  * @returns {{
  *   ok: boolean,
@@ -315,16 +365,16 @@ export function checkShoulderAnkleWidth(landmarks) {
   const tolerance = CFG.shoulder_ankle_tolerance;
 
   let status = 'ok';
-  let feedback = 'Great! Your stance looks good.';
+  let feedback = 'Your foot width is okay.';
   let ok = true;
 
   if (ratio < 1 - tolerance) {
     status = 'narrow';
-    feedback = 'Please spread your feet slightly.';
+    feedback = 'Move your feet farther apart.';
     ok = false;
   } else if (ratio > 1 + tolerance) {
     status = 'wide';
-    feedback = 'Please bring your feet closer together.';
+    feedback = 'Bring your feet slightly closer together.';
     ok = false;
   }
 
@@ -344,9 +394,95 @@ export function checkShoulderAnkleWidth(landmarks) {
   };
 }
 
+/**
+ * True when live ankle width has drifted significantly outside the locked
+ * shoulder-width tolerance (used after foot width is accepted).
+ */
+export function isAnkleWidthSignificantlyOut(landmarks, lockedRatio, significantMul = 1.5) {
+  if (lockedRatio == null) return false;
+  const check = checkShoulderAnkleWidth(landmarks);
+  const tol = check.tolerance * significantMul;
+  return check.ratio < 1 - tol || check.ratio > 1 + tol;
+}
+
+/**
+ * Stance-phase toe validation — left and right independently.
+ *
+ * Rule (per spec): facing the camera, each ankle and its own toe (foot
+ * index) must sit on the same vertical line — i.e. the toe should point
+ * straight ahead, not swing left or right. We do NOT compute an "angle";
+ * we simply measure how far the toe has drifted horizontally away from its
+ * own ankle (normalised by shoulder width) and treat near-zero as
+ * "coincident" / correct.
+ */
+export function checkStanceToeAngles(landmarks) {
+  const la  = landmarks[LM.LEFT_ANKLE];
+  const ra  = landmarks[LM.RIGHT_ANKLE];
+  const lfi = landmarks[LM.LEFT_FOOT_INDEX];
+  const rfi = landmarks[LM.RIGHT_FOOT_INDEX];
+  const ls  = landmarks[LM.LEFT_SHOULDER];
+  const rs  = landmarks[LM.RIGHT_SHOULDER];
+  const sw  = Math.max(Math.abs(ls.x - rs.x), 1e-6);
+
+  // Raw (unmirrored) camera-space offset of each toe from its own ankle.
+  const leftDx  = (lfi.x - la.x) / sw;
+  const rightDx = (rfi.x - ra.x) / sw;
+  const tolerance = CFG.foot_index_align_ratio_max;
+
+  // The live preview is mirrored (selfie-style) for the user, but `dx` is
+  // measured in raw camera coordinates. To bring dx back towards zero we
+  // need to move the toe in the "-sign(dx)" raw direction. On a mirrored
+  // display, a "-x" raw move renders as screen-LEFT and a "+x" raw move
+  // renders as screen-RIGHT — so a positive dx (toe.x > ankle.x) needs a
+  // raw decrease, which appears on screen as "move right", and a negative
+  // dx needs a raw increase, which appears as "move left". (Same rule used
+  // for the mirrored knee-direction cues.)
+  const directionFor = (dx) => (dx > 0 ? 'right' : 'left');
+
+  const leftOk  = Math.abs(leftDx)  <= tolerance;
+  const rightOk = Math.abs(rightDx) <= tolerance;
+  const ok = leftOk && rightOk;
+
+  const feedbacks = [];
+  const instructionKeys = [];
+  const cues = [];
+
+  if (!leftOk) {
+    const dir = directionFor(leftDx);
+    feedbacks.push(`Rotate your left toe towards the ${dir}.`);
+    instructionKeys.push(`toe_left_${dir}`);
+    cues.push(cueForView(dir === 'left' ? 'toe_left_outer' : 'toe_left_inner'));
+  }
+  if (!rightOk) {
+    const dir = directionFor(rightDx);
+    feedbacks.push(`Rotate your right toe towards the ${dir}.`);
+    instructionKeys.push(`toe_right_${dir}`);
+    cues.push(cueForView(dir === 'left' ? 'toe_right_outer' : 'toe_right_inner'));
+  }
+
+  return {
+    ok,
+    leftOk,
+    rightOk,
+    leftDx: Math.abs(leftDx),
+    rightDx: Math.abs(rightDx),
+    rawLeftDx: leftDx,
+    rawRightDx: rightDx,
+    tolerance,
+    feedbacks,
+    instructionKeys,
+    feedback: feedbacks.join(' ') || 'Your toes are pointing straight — great.',
+    cues,
+    allCues: cues,
+    checkOk: { toe_left: leftOk, toe_right: rightOk, toe_angle: ok },
+    skelOk: ok,
+    stanceMode: 'toes',
+  };
+}
+
 // ---------------------------------------------------------------------------
 // Stance checks (from Python check_shoulder_foot_vertical etc.)
-// Used during EXERCISE_ACTIVE form monitoring — not for STANCE_CHECK.
+// Used during EXERCISE_ACTIVE form monitoring — not for stance setup phases.
 // ---------------------------------------------------------------------------
 
 export function checkShoulderFootVertical(landmarks) {
@@ -354,31 +490,9 @@ export function checkShoulderFootVertical(landmarks) {
   const rs = landmarks[LM.RIGHT_SHOULDER];
   const la = landmarks[LM.LEFT_ANKLE];
   const ra = landmarks[LM.RIGHT_ANKLE];
-
   const sw = Math.max(Math.abs(ls.x - rs.x), 1e-6);
-  const leftDx  = (la.x - ls.x) / sw;
-  const rightDx = (ra.x - rs.x) / sw;
-
-  const lLo = -(CFG.shoulder_foot_align_ratio_max + CFG.sf_left_inner_offset_ratio);
-  const lHi = +(CFG.shoulder_foot_align_ratio_max + CFG.sf_left_outer_offset_ratio);
-  const rLo = -(CFG.shoulder_foot_align_ratio_max + CFG.sf_right_inner_offset_ratio);
-  const rHi = +(CFG.shoulder_foot_align_ratio_max + CFG.sf_right_outer_offset_ratio);
-
-  const issues = []; const cueKeys = [];
-  if (!(lLo <= leftDx && leftDx <= lHi)) {
-    issues.push(`${viewSide('left')} foot not under ${viewSide('left')} shoulder`);
-    cueKeys.push(cueForView(leftDx < lLo ? 'ankle_left_inner' : 'ankle_left_outer'));
-  }
-  if (!(rLo <= rightDx && rightDx <= rHi)) {
-    issues.push(`${viewSide('right')} foot not under ${viewSide('right')} shoulder`);
-    cueKeys.push(cueForView(rightDx < rLo ? 'ankle_right_outer' : 'ankle_right_inner'));
-  }
-  if (issues.length) {
-    return ['Shoulder-Foot: ' + issues.join('; '), 'red', Math.abs(leftDx), Math.abs(rightDx), cueKeys,
-            sw, ls.x, rs.x, la, ra];
-  }
-  return ['Shoulder-Foot: OK', 'green', Math.abs(leftDx), Math.abs(rightDx), [],
-          sw, ls.x, rs.x, la, ra];
+  // Shoulder X must not constrain ankle position anywhere in the front-view pipeline.
+  return ['Shoulder-Foot: N/A', 'green', 0, 0, [], sw, ls.x, rs.x, la, ra];
 }
 
 export function checkShoulderFootIndexVertical(landmarks) {
@@ -386,31 +500,9 @@ export function checkShoulderFootIndexVertical(landmarks) {
   const rs  = landmarks[LM.RIGHT_SHOULDER];
   const lfi = landmarks[LM.LEFT_FOOT_INDEX];
   const rfi = landmarks[LM.RIGHT_FOOT_INDEX];
-
-  const sw    = Math.max(Math.abs(ls.x - rs.x), 1e-6);
-  const leftDx  = (lfi.x - ls.x) / sw;
-  const rightDx = (rfi.x - rs.x) / sw;
-
-  const lLo = -(CFG.foot_index_align_ratio_max + CFG.fi_left_inner_offset_ratio);
-  const lHi = +(CFG.foot_index_align_ratio_max + CFG.fi_left_outer_offset_ratio);
-  const rLo = -(CFG.foot_index_align_ratio_max + CFG.fi_right_inner_offset_ratio);
-  const rHi = +(CFG.foot_index_align_ratio_max + CFG.fi_right_outer_offset_ratio);
-
-  const issues = []; const cueKeys = [];
-  if (!(lLo <= leftDx && leftDx <= lHi)) {
-    issues.push(`${viewSide('left')} foot index not under ${viewSide('left')} shoulder`);
-    cueKeys.push(cueForView(leftDx < lLo ? 'toe_left_inner' : 'toe_left_outer'));
-  }
-  if (!(rLo <= rightDx && rightDx <= rHi)) {
-    issues.push(`${viewSide('right')} foot index not under ${viewSide('right')} shoulder`);
-    cueKeys.push(cueForView(rightDx < rLo ? 'toe_right_outer' : 'toe_right_inner'));
-  }
-  if (issues.length) {
-    return ['FootIdx: ' + issues.join('; '), 'red', Math.abs(leftDx), Math.abs(rightDx), cueKeys,
-            sw, ls.x, rs.x, lfi, rfi];
-  }
-  return ['FootIdx: OK', 'green', Math.abs(leftDx), Math.abs(rightDx), [],
-          sw, ls.x, rs.x, lfi, rfi];
+  const sw  = Math.max(Math.abs(ls.x - rs.x), 1e-6);
+  // Toe X must not be judged against shoulder X in front view.
+  return ['FootIdx: N/A', 'green', 0, 0, [], sw, ls.x, rs.x, lfi, rfi];
 }
 
 export function checkShoulderKneeVertical(landmarks) {
@@ -418,10 +510,12 @@ export function checkShoulderKneeVertical(landmarks) {
   const rs = landmarks[LM.RIGHT_SHOULDER];
   const lk = landmarks[LM.LEFT_KNEE];
   const rk = landmarks[LM.RIGHT_KNEE];
+  const la = landmarks[LM.LEFT_ANKLE];
+  const ra = landmarks[LM.RIGHT_ANKLE];
 
   const sw    = Math.max(Math.abs(ls.x - rs.x), 1e-6);
-  const leftDx  = (lk.x - ls.x) / sw;
-  const rightDx = (rk.x - rs.x) / sw;
+  const leftDx  = (lk.x - la.x) / sw;
+  const rightDx = (rk.x - ra.x) / sw;
 
   const lLo = -(CFG.knee_align_ratio_max + CFG.kn_left_inner_offset_ratio);
   const lHi = +(CFG.knee_align_ratio_max + CFG.kn_left_outer_offset_ratio);
@@ -430,11 +524,11 @@ export function checkShoulderKneeVertical(landmarks) {
 
   const issues = []; const cueKeys = [];
   if (!(lLo <= leftDx && leftDx <= lHi)) {
-    issues.push(`${viewSide('left')} knee not under ${viewSide('left')} shoulder`);
+    issues.push('left knee not over left ankle');
     cueKeys.push(cueForView(leftDx < lLo ? 'knee_left_inner' : 'knee_left_outer'));
   }
   if (!(rLo <= rightDx && rightDx <= rHi)) {
-    issues.push(`${viewSide('right')} knee not under ${viewSide('right')} shoulder`);
+    issues.push('right knee not over right ankle');
     cueKeys.push(cueForView(rightDx < rLo ? 'knee_right_outer' : 'knee_right_inner'));
   }
   if (issues.length) {
@@ -544,7 +638,11 @@ export function checkShoulderLevel(landmarks) {
   if (ok) {
     return ['Shoulder level: OK', 'green', dyRatio, ls.x, ls.y, rs.x, rs.y, sw, []];
   }
-  const shlvlCue = cueForView(ls.y < rs.y ? 'shoulder_high_left' : 'shoulder_high_right');
+  // Which shoulder is physically higher is a vertical (Y) comparison of
+  // anatomically-labelled landmarks — it does NOT depend on horizontal
+  // mirroring, so (unlike X-based screen-direction cues) this must NOT be
+  // passed through cueForView()'s left/right swap.
+  const shlvlCue = ls.y < rs.y ? 'shoulder_high_left' : 'shoulder_high_right';
   return ['Shoulder ALERT: uneven height', 'red', dyRatio, ls.x, ls.y, rs.x, rs.y, sw, [shlvlCue]];
 }
 

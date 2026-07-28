@@ -121,53 +121,35 @@ export function drawStancePassTicks(ctx, w, stance) {
 // drawShoulderFootGuides — ankle tolerance rails
 // ---------------------------------------------------------------------------
 export function drawShoulderFootGuides(ctx, landmarks, w, h, sustainedCues) {
-  const ls = landmarks[LM.LEFT_SHOULDER];
-  const rs = landmarks[LM.RIGHT_SHOULDER];
-  const la = landmarks[LM.LEFT_ANKLE];
-  const ra = landmarks[LM.RIGHT_ANKLE];
-  if (Math.min(ls.visibility, rs.visibility, la.visibility, ra.visibility) < 0.2) return;
-
-  const sw = Math.max(Math.abs(ls.x - rs.x), 1e-6);
-  const leftDx  = (la.x - ls.x) / sw;
-  const rightDx = (ra.x - rs.x) / sw;
-  const lIn  = CFG.shoulder_foot_align_ratio_max + CFG.sf_left_inner_offset_ratio;
-  const lOut = CFG.shoulder_foot_align_ratio_max + CFG.sf_left_outer_offset_ratio;
-  const rIn  = CFG.shoulder_foot_align_ratio_max + CFG.sf_right_inner_offset_ratio;
-  const rOut = CFG.shoulder_foot_align_ratio_max + CFG.sf_right_outer_offset_ratio;
-  const leftOk  = -lIn <= leftDx  && leftDx  <= lOut;
-  const rightOk = -rIn <= rightDx && rightDx <= rOut;
-
-  _drawRailSide(ctx, ls, la, lIn, lOut, leftDx,  leftOk,  sw, w, h,
-    CFG.sf_line_half_len_ratio, 'rgb(0,255,0)', 'rgb(0,0,255)',
-    sustainedCues, cueForView('ankle_left_inner'), cueForView('ankle_left_outer'));
-  _drawRailSide(ctx, rs, ra, rIn, rOut, rightDx, rightOk, sw, w, h,
-    CFG.sf_line_half_len_ratio, 'rgb(0,255,0)', 'rgb(0,0,255)',
-    sustainedCues, cueForView('ankle_right_outer'), cueForView('ankle_right_inner'));
+  // Intentionally disabled: front-view stance must not draw shoulder-origin
+  // ankle alignment rails or use shoulder X as an ankle-position constraint.
+  void ctx; void landmarks; void w; void h; void sustainedCues;
 }
 
 export function drawFootIndexGuides(ctx, landmarks, w, h, sustainedCues) {
-  const ls  = landmarks[LM.LEFT_SHOULDER];
-  const rs  = landmarks[LM.RIGHT_SHOULDER];
+  const la  = landmarks[LM.LEFT_ANKLE];
+  const ra  = landmarks[LM.RIGHT_ANKLE];
   const lfi = landmarks[LM.LEFT_FOOT_INDEX];
   const rfi = landmarks[LM.RIGHT_FOOT_INDEX];
-  if (Math.min(ls.visibility, rs.visibility, lfi.visibility, rfi.visibility) < 0.2) return;
+  const ls  = landmarks[LM.LEFT_SHOULDER];
+  const rs  = landmarks[LM.RIGHT_SHOULDER];
+  if (Math.min(la.visibility, ra.visibility, lfi.visibility, rfi.visibility, ls.visibility, rs.visibility) < 0.2) return;
 
+  // Same-line (coincidence) rule: draw a symmetric ± tolerance band around
+  // each ankle's x-position and show whether that foot's toe falls inside it.
   const sw = Math.max(Math.abs(ls.x - rs.x), 1e-6);
-  const leftDx  = (lfi.x - ls.x) / sw;
-  const rightDx = (rfi.x - rs.x) / sw;
-  const lIn  = CFG.foot_index_align_ratio_max + CFG.fi_left_inner_offset_ratio;
-  const lOut = CFG.foot_index_align_ratio_max + CFG.fi_left_outer_offset_ratio;
-  const rIn  = CFG.foot_index_align_ratio_max + CFG.fi_right_inner_offset_ratio;
-  const rOut = CFG.foot_index_align_ratio_max + CFG.fi_right_outer_offset_ratio;
-  const leftOk  = -lIn <= leftDx  && leftDx  <= lOut;
-  const rightOk = -rIn <= rightDx && rightDx <= rOut;
+  const tol = CFG.foot_index_align_ratio_max;
+  const leftDx  = (lfi.x - la.x) / sw;
+  const rightDx = (rfi.x - ra.x) / sw;
+  const leftOk  = Math.abs(leftDx)  <= tol;
+  const rightOk = Math.abs(rightDx) <= tol;
 
-  _drawRailSide(ctx, ls, lfi, lIn, lOut, leftDx,  leftOk,  sw, w, h,
+  _drawToeRailSide(ctx, la, lfi, -tol, tol, leftDx, leftOk, sw, w, h,
     CFG.fi_line_half_len_ratio, 'rgb(80,255,80)', 'rgb(0,80,255)',
-    sustainedCues, cueForView('toe_left_inner'), cueForView('toe_left_outer'));
-  _drawRailSide(ctx, rs, rfi, rIn, rOut, rightDx, rightOk, sw, w, h,
+    sustainedCues, 'toe_left_left', 'toe_left_right');
+  _drawToeRailSide(ctx, ra, rfi, -tol, tol, rightDx, rightOk, sw, w, h,
     CFG.fi_line_half_len_ratio, 'rgb(80,255,80)', 'rgb(0,80,255)',
-    sustainedCues, cueForView('toe_right_outer'), cueForView('toe_right_inner'));
+    sustainedCues, 'toe_right_left', 'toe_right_right');
 }
 
 export function drawKneeGuides(ctx, landmarks, w, h, sustainedCues) {
@@ -224,6 +206,37 @@ function _drawRailSide(ctx, shoulder, point, inRatio, outRatio, dxSigned, ok, sw
   ctx.strokeStyle = 'rgb(120,180,230)';
   ctx.lineWidth   = 2;
   _line(ctx, sx, py, px, py);
+  ctx.restore();
+}
+
+function _drawToeRailSide(ctx, anchor, point, loRatio, hiRatio, dxSigned, ok, sw, w, h,
+                          halfLenRatio, okColor, failColor, sustainedCues, innerKey, outerKey) {
+  const ax = clamp(Math.round(anchor.x * w), 0, w - 1);
+  const px = clamp(Math.round(point.x * w), 0, w - 1);
+  const py = clamp(Math.round(point.y * h), 0, h - 1);
+  const halfLen = Math.max(4, Math.round(halfLenRatio * h));
+  const y0 = Math.max(0, py - halfLen);
+  const y1 = Math.min(h - 1, py + halfLen);
+  const col = ok ? okColor : failColor;
+  const xLo = clamp(Math.round(ax + loRatio * sw * w), 0, w - 1);
+  const xHi = clamp(Math.round(ax + hiRatio * sw * w), 0, w - 1);
+  const loCross = dxSigned < loRatio;
+  const hiCross = dxSigned > hiRatio;
+
+  ctx.save();
+  ctx.lineWidth = 2;
+  ctx.strokeStyle = loCross ? blinkRedYellow(sustainedCues, innerKey) : 'rgb(0,200,255)';
+  _line(ctx, xLo, y0, xLo, y1);
+  ctx.strokeStyle = hiCross ? blinkRedYellow(sustainedCues, outerKey) : 'rgb(0,200,255)';
+  _line(ctx, xHi, y0, xHi, y1);
+  ctx.lineWidth = 1;
+  ctx.strokeStyle = col;
+  _line(ctx, ax, y0, ax, y1);
+  ctx.fillStyle = col;
+  ctx.beginPath(); ctx.arc(ax, py, 4, 0, Math.PI * 2); ctx.fill();
+  ctx.strokeStyle = 'rgb(120,180,230)';
+  ctx.lineWidth = 2;
+  _line(ctx, ax, py, px, py);
   ctx.restore();
 }
 
@@ -463,8 +476,6 @@ export function drawStanceAnkleWidthGuides(ctx, stanceData, w, h) {
 // ---------------------------------------------------------------------------
 export function drawAllStanceToleranceGuides(ctx, landmarks, stanceData, w, h, sustainedCues) {
   const { hip, torso, shlvl, kneeX, kneeY } = stanceData;
-  drawShoulderFootGuides(ctx, landmarks, w, h, sustainedCues);
-  drawFootIndexGuides(ctx, landmarks, w, h, sustainedCues);
   drawKneeGuides(ctx, landmarks, w, h, sustainedCues);
   drawHipCenterGuides(ctx, hip.x, hip.y, kneeX, kneeY, hip.sw, hip.dx, w, h, sustainedCues);
   drawTorsoFrontGuides(ctx, torso.shX, torso.shY, torso.hipX, torso.hipY, torso.sw, torso.dx, torso.vGap, w, h, sustainedCues);

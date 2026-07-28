@@ -4,7 +4,8 @@
 // Priority (highest first):
 //   1. Speed (too fast / too slow)
 //   2. Knee (inward / outward)
-//   3. Torso forward bend
+//   3. Torso (forward bend or sideways lean)
+//   4. Shoulder level (uneven shoulders)
 
 export const REP_WARNING_VOICE = {
   too_fast: 'Too fast.',
@@ -33,10 +34,10 @@ export function speedKeyToMessage(speedKey) {
 }
 
 /**
- * @param {{ speedKey?: string|null, kneeMsg?: string|null, torsoMsg?: string|null }} candidates
- * @returns {{ key: string, text: string, kind: 'speed'|'knee'|'torso' }|null}
+ * @param {{ speedKey?: string|null, kneeMsg?: string|null, torsoMsg?: string|null, shoulderMsg?: string|null }} candidates
+ * @returns {{ key: string, text: string, kind: 'speed'|'knee'|'torso'|'shoulder' }|null}
  */
-export function selectRepPostureWarning({ speedKey, kneeMsg, torsoMsg }) {
+export function selectRepPostureWarning({ speedKey, kneeMsg, torsoMsg, shoulderMsg }) {
   const speedMsg = speedKeyToMessage(speedKey);
   if (speedMsg) {
     return { key: 'rep_speed', text: speedMsg, kind: 'speed' };
@@ -46,6 +47,9 @@ export function selectRepPostureWarning({ speedKey, kneeMsg, torsoMsg }) {
   }
   if (torsoMsg) {
     return { key: 'torso_posture', text: torsoMsg, kind: 'torso' };
+  }
+  if (shoulderMsg) {
+    return { key: 'shoulder_posture', text: shoulderMsg, kind: 'shoulder' };
   }
   return null;
 }

@@ -89,10 +89,10 @@ export class SquatRepTracker {
   static DESCEND_SLOW_MIN = 4.0;
   static ASCEND_FAST_MAX  = 2.0;
   static ASCEND_SLOW_MIN  = 4.0;
-  static REP_FAST_MAX     = 4.0;
-  static REP_SLOW_MIN     = 7.0;
-  static REP_PERFECT_MIN  = 4.0;
-  static REP_PERFECT_MAX  = 7.0;
+  static REP_FAST_MAX     = 1.5;
+  static REP_SLOW_MIN     = 4.0;
+  static REP_PERFECT_MIN  = 1.5;
+  static REP_PERFECT_MAX  = 4.0;
   static SPEED_WARN_HOLD_SEC = 2.5;
 
   static TEMPO_IDLE     = 'idle';
@@ -186,11 +186,11 @@ export class SquatRepTracker {
     // NEW timing logic — this is now the SOLE source of fast/slow warnings.
     // d = total seconds from hip crossing BELOW the gate (descent start)
     //     to hip crossing back ABOVE the gate (ascent finish).
-    //   <2s  → Fast Squat
-    //   2-4s → Perfect Squat
+    //   <1.5s   → Fast Squat
+    //   1.5-4s  → Perfect Squat
     //   >4s  → Slow Squat
     const d    = this.lastTempoDuration;
-    const tMin = CFG.tempo_min_sec;   // 2.0
+    const tMin = CFG.tempo_min_sec;   // 1.5
     const tMax = CFG.tempo_max_sec;   // 4.0
     if (d < tMin) {
       this.lastTempoResult = 'fast';
@@ -199,7 +199,7 @@ export class SquatRepTracker {
     } else if (d <= tMax) {
       this.lastTempoResult = 'good';
       this._pendingTempoVoiceKey = 'squat_tempo_good';
-      // No warning for perfect (2-4s)
+      // No warning for perfect (1.5-4s)
     } else {
       this.lastTempoResult = 'slow';
       this._pendingTempoVoiceKey = 'squat_rep_slow';

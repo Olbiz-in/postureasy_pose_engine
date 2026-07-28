@@ -1,9 +1,9 @@
-// Per-rep knee tracking (valgus/varus) — ported from fitness_posture.
-// Measures each knee's horizontal offset from the same-side shoulder, normalized
+// Per-rep knee tracking for front-view squats.
+// Measures each knee's horizontal offset from the same-side ankle, normalized
 // by shoulder width, then flags a leg only if it stays out of tolerance for a
 // sustained window. Side labels are mirror-aware for a selfie camera.
 
-import { CFG, viewSide } from './config';
+import { CFG } from './config';
 import { LM, nowSec } from '../../core/landmarks';
 
 export function computeKneeAlignRatios(landmarks) {
@@ -11,13 +11,15 @@ export function computeKneeAlignRatios(landmarks) {
   const rs = landmarks[LM.RIGHT_SHOULDER];
   const lk = landmarks[LM.LEFT_KNEE];
   const rk = landmarks[LM.RIGHT_KNEE];
+  const la = landmarks[LM.LEFT_ANKLE];
+  const ra = landmarks[LM.RIGHT_ANKLE];
 
   const visMin = CFG.keypoint_vis_min;
   const ok = (lm) => lm && (lm.visibility == null || lm.visibility >= visMin);
-  if (![ls, rs, lk, rk].every(ok)) return null;
+  if (![ls, rs, lk, rk, la, ra].every(ok)) return null;
 
   const sw = Math.max(Math.abs(ls.x - rs.x), 1e-6);
-  return { leftDx: (lk.x - ls.x) / sw, rightDx: (rk.x - rs.x) / sw, sw };
+  return { leftDx: (lk.x - la.x) / sw, rightDx: (rk.x - ra.x) / sw, sw };
 }
 
 export function kneeAlignBand(side) {
@@ -31,12 +33,13 @@ export function kneeAlignBand(side) {
 export function classifyKneeAlign(dx, side) {
   const { lo, hi } = kneeAlignBand(side);
   if (dx >= lo && dx <= hi) return { bad: false, direction: null, dx };
-  if (side === 'left') {
-    if (dx < lo) return { bad: true, direction: 'inward', dx };
-    return { bad: true, direction: 'outward', dx };
-  }
-  if (dx < lo) return { bad: true, direction: 'outward', dx };
-  return { bad: true, direction: 'inward', dx };
+  // The live preview is mirrored (selfie-style) for the user, but `dx` is
+  // computed from the raw (unmirrored) camera coordinates that MediaPipe
+  // sees. A raw-space correction of "+x" (dx < lo, needs to increase)
+  // renders as the knee needing to move towards screen-LEFT on the mirrored
+  // preview; a raw-space "-x" correction (dx > hi) renders as screen-RIGHT.
+  if (dx < lo) return { bad: true, direction: 'left', dx };
+  return { bad: true, direction: 'right', dx };
 }
 
 function smoothEma(prev, next, alpha) {
@@ -48,23 +51,15 @@ function capitalize(s) {
 }
 
 function legMessage(anatomicalSide, direction) {
-  const which = `${capitalize(viewSide(anatomicalSide))} knee`;
-  if (direction === 'outward') return `Your ${which} went too wide. Next rep, bring it slightly inward.`;
-  if (direction === 'inward') return `Your ${which} caved in. Next rep, push it slightly outward.`;
+  const which = `${capitalize(anatomicalSide)} knee`;
+  if (direction === 'left') return `Move your ${which} towards the left.`;
+  if (direction === 'right') return `Move your ${which} towards the right.`;
   return null;
 }
 
 export function kneePostureMessage(qualifiedLegs) {
   if (!qualifiedLegs?.length) return null;
   if (qualifiedLegs.length === 2) {
-    const [a, b] = qualifiedLegs;
-    const la = viewSide(a.side);
-    const lb = viewSide(b.side);
-    if (a.direction === b.direction) {
-      return a.direction === 'outward'
-        ? `Your ${la} and ${lb} knees went too wide. Bring both knees inward.`
-        : `Your ${la} and ${lb} knees caved in. Push both knees outward.`;
-    }
     return qualifiedLegs.map((leg) => legMessage(leg.side, leg.direction)).filter(Boolean).join(' ');
   }
   return legMessage(qualifiedLegs[0].side, qualifiedLegs[0].direction);

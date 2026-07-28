@@ -16,11 +16,35 @@ for (const [k, v] of Object.entries(TORSO_BEND_DEFAULTS)) {
 export const TORSO_FORWARD_BEND_MSG =
   'You are bending too much forward. Stay straight during squat.';
 
+// Horizontal drift: the whole upper body (chest/shoulders) shifted sideways
+// relative to the hips, i.e. the torso is leaning/turned left or right —
+// distinct from forward bend, but was previously detected and drawn
+// (red-blink tolerance rail) yet never spoken. Direction is already
+// mirror-corrected inside checkTorsoFrontVertical via cueForView().
+export const TORSO_SIDE_LEAN_MSG = {
+  torso_x_left:  'Your upper body is leaning to the left. Stay straight.',
+  torso_x_right: 'Your upper body is leaning to the right. Stay straight.',
+};
+
 /** True when vertical-gap check flags excessive forward lean (not side drift). */
 export function isTorsoForwardBendFrame(landmarks) {
   const result = checkTorsoFrontVertical(landmarks);
   const cueKeys = result[9] || [];
   return cueKeys.includes('torso_bend');
+}
+
+/**
+ * Classifies the current frame's torso issue, if any.
+ * Forward bend takes priority over side lean when both happen at once
+ * (matches the existing knee > torso ordering style used elsewhere).
+ */
+function torsoIssueForFrame(landmarks) {
+  const result = checkTorsoFrontVertical(landmarks);
+  const cueKeys = result[9] || [];
+  if (cueKeys.includes('torso_bend')) return 'torso_bend';
+  if (cueKeys.includes('torso_x_left')) return 'torso_x_left';
+  if (cueKeys.includes('torso_x_right')) return 'torso_x_right';
+  return null;
 }
 
 // ── Per-rep monitor ───────────────────────────────────────────────────────────
@@ -31,14 +55,14 @@ export class TorsoBendRepMonitor {
   }
 
   resetAll() {
-    this._bendOnsetT = -1;
-    this._qualified = false;
+    this._onsetT = -1;
+    this._onsetKey = null;
+    this._qualifiedKey = null;
     this._inRep = false;
   }
 
   onRepStart() {
-    this._bendOnsetT = -1;
-    this._qualified = false;
+    this.resetAll();
     this._inRep = true;
   }
 
@@ -47,22 +71,31 @@ export class TorsoBendRepMonitor {
 
     const now = nowSec();
     const sustain = CFG.torso_bend_sustain_sec;
+    const issue = torsoIssueForFrame(landmarks);
 
-    if (!isTorsoForwardBendFrame(landmarks)) {
-      this._bendOnsetT = -1;
+    if (!issue) {
+      this._onsetT = -1;
+      this._onsetKey = null;
       return;
     }
 
-    if (this._bendOnsetT < 0) this._bendOnsetT = now;
-    if (now - this._bendOnsetT >= sustain) {
-      this._qualified = true;
+    // Track sustain per-issue so a quick switch (e.g. bend -> side lean)
+    // doesn't inherit the other issue's elapsed time.
+    if (this._onsetKey !== issue) {
+      this._onsetKey = issue;
+      this._onsetT = now;
+    }
+    if (!this._qualifiedKey && now - this._onsetT >= sustain) {
+      this._qualifiedKey = issue;
     }
   }
 
   consumeEndOfRepFeedback() {
-    const msg = this._qualified ? TORSO_FORWARD_BEND_MSG : null;
+    const key = this._qualifiedKey;
     this.resetAll();
-    return msg;
+    if (!key) return null;
+    if (key === 'torso_bend') return TORSO_FORWARD_BEND_MSG;
+    return TORSO_SIDE_LEAN_MSG[key] || null;
   }
 
   onRepCancelled() {

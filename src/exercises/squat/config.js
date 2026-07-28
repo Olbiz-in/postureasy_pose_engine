@@ -99,7 +99,7 @@ export const CFG_DEFAULTS = {
   squat_between_line_width_ratio: 1.10,
   tempo_gate_offset_ratio: 0.08,
   tempo_gate_hysteresis_ratio: 0.015,
-  tempo_min_sec: 2.0,
+  tempo_min_sec: 1.5,
   tempo_max_sec: 4.0,
   knee_angle_sustain_sec: 1.0,
   knee_angle_smooth_alpha: 0.28,
@@ -173,13 +173,13 @@ export const TRAINER_CUES = {
   squat_too_deep: ['Too deep! Rise up a little', 'Come up — you\'re below your knees'],
   squat_go_deeper: ['Go deeper — not a full rep yet', 'Squat lower to count this rep'],
   squat_descend_fast: ['Slow down! Going down too fast — aim 2-3 seconds down'],
-  squat_descend_slow: ['Descend a bit faster — smooth 2-4 seconds total'],
+  squat_descend_slow: ['Descend a bit faster — smooth 1.5-4 seconds total'],
   squat_ascend_fast: ['Slow down on the way up — push steadily ~1-2 seconds'],
   squat_ascend_slow: ['Push up with more power — ascent is too slow'],
-  squat_rep_fast: ['Too fast! Aim for 2 to 4 seconds', 'Slow down — control the movement'],
-  squat_rep_slow: ['Too slow! Push with more power', 'Speed it up — aim for 2 to 4 seconds'],
-  squat_tempo_good: ['Great tempo! Keep it up', 'Perfect pace — 2 to 4 seconds'],
-  squat_pace_perfect: ['Great pace! Perfect squat speed — keep this 2-4 second rhythm'],
+  squat_rep_fast: ['Too fast! Aim for 1.5 to 4 seconds', 'Slow down — control the movement'],
+  squat_rep_slow: ['Too slow! Push with more power', 'Speed it up — aim for 1.5 to 4 seconds'],
+  squat_tempo_good: ['Great tempo! Keep it up', 'Perfect pace — 1.5 to 4 seconds'],
+  squat_pace_perfect: ['Great pace! Perfect squat speed — keep this 1.5-4 second rhythm'],
 };
 
 export const VOICE_CUES = {
@@ -204,9 +204,9 @@ export const VOICE_CUES = {
   shoulder_high_right: ['Drop your right shoulder.', 'Level up — right shoulder is too high.'],
   squat_too_deep: ['Too deep! Rise up a little.', 'You are going too deep. Come up slightly.'],
   squat_go_deeper: ['Go a little deeper for a full rep.', 'Squat lower — you need to reach your knees.'],
-  squat_rep_fast: ['Too fast. Aim for two to four seconds through the tempo gate.', 'Slow down and control the movement.'],
-  squat_rep_slow: ['Too slow. Push with more power through the tempo gate.', 'Speed it up — aim for two to four seconds.'],
-  squat_tempo_good: ['Great tempo. Keep it up.', 'Perfect pace — two to four seconds.'],
+  squat_rep_fast: ['Too fast. Aim for one point five to four seconds through the tempo gate.', 'Slow down and control the movement.'],
+  squat_rep_slow: ['Too slow. Push with more power through the tempo gate.', 'Speed it up — aim for one point five to four seconds.'],
+  squat_tempo_good: ['Great tempo. Keep it up.', 'Perfect pace — one point five to four seconds.'],
 };
 
 export function bgr(b, g, r) {
