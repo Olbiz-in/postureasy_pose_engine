@@ -433,6 +433,33 @@ export class SquatRepTracker {
     return null;
   }
 
+  /**
+   * Discard an in-flight (not-yet-completed) rep instead of letting it be
+   * evaluated against stale timing/position data.  Used when the pose was
+   * lost mid-rep (user stepped out of frame) and reappears — without this,
+   * `update()` would compare the fresh landmarks against the multi-second-old
+   * `_downStartT`/gap snapshot captured right before the pose vanished and
+   * could spuriously fire a "rep completed" (or drop the real rep timing),
+   * corrupting the rep count / voice sequence. Calibration (`_standGap`) and
+   * the finished `repMetrics` history are left untouched.
+   */
+  cancelInProgressRep() {
+    this._inSquat = false;
+    this._reachedFull = false;
+    this._downStartT = -999;
+    this._timeStartT = -1;
+    this._bottomT = -1;
+    this._repMinGap = 999;
+    this._repMaxLrAsym = 0;
+    this._repCueCounts = {};
+    // The tempo gate may be stuck mid-cycle (BELOW_GATE) referencing a
+    // down-crossing timestamp from before the interruption — drop it back
+    // to idle so the next real crossing starts a fresh, accurate timer.
+    this._tempoState    = SquatRepTracker.TEMPO_IDLE;
+    this._tempoDownTime = 0;
+    this._tempoUpTime   = 0;
+  }
+
   observeRepFormCues(cueKeys) {
     if (!this._inSquat) return;
     for (const key of cueKeys) {

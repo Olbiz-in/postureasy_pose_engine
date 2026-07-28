@@ -51,6 +51,12 @@ const STANCE_ANNOUNCE_SEC      = 2.8;  // min time in a stance step before it ca
 const STANCE_ANNOUNCE_MAX_SEC  = 7.0;  // don't block forever if TTS never ends
 const READY_TO_START_DELAY_SEC = 4.5;  // wait for "do rep one" announcement
 
+// If the full-body gate fails for at least this long, treat it as the user
+// actually leaving/re-entering the frame (as opposed to a single-frame
+// landmark flicker) and discard any in-flight rep state on return so a stale
+// pose snapshot can't falsely complete/miscount a rep.
+const BODY_GONE_RESET_SEC     = 0.6;
+
 // Trainer-like correction pacing: a real trainer gives ONE instruction, then
 // watches and waits for the user to actually attempt the correction before
 // saying anything else. These two constants control that behaviour:
@@ -143,6 +149,7 @@ export class SquatFlow {
     this._prevStanceSnapshot = null;
     this._lockedAnkleRatio = null;
     this._lastSeenRep = 0;
+    this._bodyNotVisibleSince = -1;
     CFG.squat_max_reps = targetReps;
   }
 
@@ -335,6 +342,7 @@ export class SquatFlow {
     // ═══════════════════════════════════════════════════════════════════════
     const bodyGate = validateFullBodyVisibility(landmarks);
     if (!bodyGate.ready) {
+      if (this._bodyNotVisibleSince < 0) this._bodyNotVisibleSince = now;
       let voiceKey = 'body_not_visible';
       let voiceMsg = VOICE_MSG.body_not_visible;
       if (bodyGate.message === VOICE_MSG.head_legs_visible) {
@@ -362,6 +370,27 @@ export class SquatFlow {
         currentStanceCheck: this._currentStanceCheck,
         resumePhase: visiblePhase,
       });
+    }
+
+    // ═══════════════════════════════════════════════════════════════════════
+    // RECOVERY — the body was hidden long enough to be a real "left the
+    // frame" event (not a single-frame detector flicker). If this happened
+    // mid-exercise, any in-flight rep timing/position state is now stale and
+    // comparing it against the freshly-reappeared pose could falsely
+    // complete or miscount a rep — discard it and pick the exercise back up
+    // cleanly from the current rep count instead.
+    // ═══════════════════════════════════════════════════════════════════════
+    if (this._bodyNotVisibleSince >= 0) {
+      const goneSec = now - this._bodyNotVisibleSince;
+      this._bodyNotVisibleSince = -1;
+      if (goneSec >= BODY_GONE_RESET_SEC && cur === PHASE.EXERCISE_ACTIVE) {
+        sq.cancelInProgressRep();
+        this._wasInSquat = false;
+        this._kneeMon.onRepCancelled();
+        this._torsoMon.onRepCancelled();
+        this._shoulderMon.onRepCancelled();
+        this._speakQueued(`Let's continue. Do rep ${sq.count + 1}.`, { key: 'resume_after_gap' });
+      }
     }
 
     // ═══════════════════════════════════════════════════════════════════════
@@ -878,6 +907,7 @@ export class SquatFlow {
     this._prevStanceSnapshot = null;
     this._lockedAnkleRatio  = null;
     this._lastSeenRep       = 0;
+    this._bodyNotVisibleSince = -1;
 
     this._repCount = 0;
     this._activeFeedback = '';
