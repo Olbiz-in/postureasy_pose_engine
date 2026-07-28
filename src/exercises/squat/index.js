@@ -9,7 +9,6 @@ import {
   drawFootIndexGuides,
   drawAllStanceToleranceGuides,
   drawSquatRepOverlay,
-  drawTempoGateOverlay,
 } from './draw';
 
 function createSquatTracker(options = {}) {
@@ -92,7 +91,6 @@ function createSquatTracker(options = {}) {
         drawSquatRepOverlay(
           ctx, lastFr.squatTracker, hip.x, hip.y, kneeMid.x, kneeMid.y, sw, frame.width, frame.height,
         );
-        drawTempoGateOverlay(ctx, lastFr.squatTracker, frame.width, frame.height);
       }
     },
   };

@@ -157,11 +157,14 @@ export function drawKneeGuides(ctx, landmarks, w, h, sustainedCues) {
   const rs = landmarks[LM.RIGHT_SHOULDER];
   const lk = landmarks[LM.LEFT_KNEE];
   const rk = landmarks[LM.RIGHT_KNEE];
-  if (Math.min(ls.visibility, rs.visibility, lk.visibility, rk.visibility) < 0.2) return;
+  const la = landmarks[LM.LEFT_ANKLE];
+  const ra = landmarks[LM.RIGHT_ANKLE];
+  if (Math.min(ls.visibility, rs.visibility, lk.visibility, rk.visibility, la.visibility, ra.visibility) < 0.2) return;
 
+  // Match checkShoulderKneeVertical: knee must track over its own ankle (not shoulder X).
   const sw = Math.max(Math.abs(ls.x - rs.x), 1e-6);
-  const leftDx  = (lk.x - ls.x) / sw;
-  const rightDx = (rk.x - rs.x) / sw;
+  const leftDx  = (lk.x - la.x) / sw;
+  const rightDx = (rk.x - ra.x) / sw;
   const lIn  = CFG.knee_align_ratio_max + CFG.kn_left_inner_offset_ratio;
   const lOut = CFG.knee_align_ratio_max + CFG.kn_left_outer_offset_ratio;
   const rIn  = CFG.knee_align_ratio_max + CFG.kn_right_inner_offset_ratio;
@@ -169,12 +172,81 @@ export function drawKneeGuides(ctx, landmarks, w, h, sustainedCues) {
   const leftOk  = -lIn <= leftDx  && leftDx  <= lOut;
   const rightOk = -rIn <= rightDx && rightDx <= rOut;
 
-  _drawRailSide(ctx, ls, lk, lIn, lOut, leftDx,  leftOk,  sw, w, h,
+  _drawRailSide(ctx, la, lk, lIn, lOut, leftDx,  leftOk,  sw, w, h,
     CFG.kn_line_half_len_ratio, 'rgb(100,255,200)', 'rgb(0,120,255)',
     sustainedCues, cueForView('knee_left_inner'), cueForView('knee_left_outer'));
-  _drawRailSide(ctx, rs, rk, rIn, rOut, rightDx, rightOk, sw, w, h,
+  _drawRailSide(ctx, ra, rk, rIn, rOut, rightDx, rightOk, sw, w, h,
     CFG.kn_line_half_len_ratio, 'rgb(100,255,200)', 'rgb(0,120,255)',
     sustainedCues, cueForView('knee_right_outer'), cueForView('knee_right_inner'));
+}
+
+// ---------------------------------------------------------------------------
+// drawAnkleWidthToleranceGuides — exercise-phase foot/ankle width band
+// ---------------------------------------------------------------------------
+export function drawAnkleWidthToleranceGuides(ctx, landmarks, w, h) {
+  const ls = landmarks[LM.LEFT_SHOULDER];
+  const rs = landmarks[LM.RIGHT_SHOULDER];
+  const la = landmarks[LM.LEFT_ANKLE];
+  const ra = landmarks[LM.RIGHT_ANKLE];
+  if (Math.min(ls.visibility, rs.visibility, la.visibility, ra.visibility) < 0.2) return;
+
+  const sw = Math.max(Math.abs(ls.x - rs.x), 1e-6);
+  const ankleWidth = Math.abs(la.x - ra.x);
+  const tolerance = CFG.shoulder_ankle_tolerance;
+  const ok = Math.abs(ankleWidth / sw - 1) <= tolerance;
+
+  const lx = clamp(Math.round(la.x * w), 0, w - 1);
+  const rx = clamp(Math.round(ra.x * w), 0, w - 1);
+  const ay = clamp(Math.round(((la.y + ra.y) * 0.5) * h), 0, h - 1);
+  const midX = Math.round((lx + rx) * 0.5);
+  const targetHalf = (sw * 0.5) * w;
+  const tolPx = Math.max(2, Math.round(tolerance * sw * w));
+  const bandLo = clamp(Math.round(midX - targetHalf - tolPx), 0, w - 1);
+  const bandHi = clamp(Math.round(midX + targetHalf + tolPx), 0, w - 1);
+  const halfLen = Math.max(10, Math.round(0.035 * h));
+  const y0 = Math.max(0, ay - halfLen);
+  const y1 = Math.min(h - 1, ay + halfLen);
+  const mainCol = ok ? 'rgb(0,255,0)' : 'rgb(255,140,0)';
+
+  ctx.save();
+  ctx.lineWidth = 2;
+  ctx.strokeStyle = 'rgb(0,200,255)';
+  _line(ctx, bandLo, y0, bandLo, y1);
+  _line(ctx, bandHi, y0, bandHi, y1);
+  ctx.strokeStyle = mainCol;
+  ctx.lineWidth = 3;
+  _line(ctx, lx, ay, rx, ay);
+  ctx.restore();
+}
+
+// ---------------------------------------------------------------------------
+// drawTorsoHorizontalGuides — upper-body left/right only (no bend / no dots)
+// ---------------------------------------------------------------------------
+export function drawTorsoHorizontalGuides(ctx, shX, shY, hipX, hipY, swN, dxRatio, w, h, sustainedCues) {
+  const sx  = clamp(Math.round(shX  * w), 0, w - 1);
+  const sy  = clamp(Math.round(shY  * h), 0, h - 1);
+  const hx  = clamp(Math.round(hipX * w), 0, w - 1);
+  const hy  = clamp(Math.round(hipY * h), 0, h - 1);
+  const xTol   = CFG.torso_horizontal_align_ratio_max + CFG.torso_horizontal_offset_ratio;
+  const xTolPx = Math.max(2, Math.round(xTol * swN * w));
+  const xOk = dxRatio <= xTol;
+  const mainCol = xOk ? 'rgb(0,255,0)' : 'rgb(255,0,0)';
+  const dxSigned = (shX - hipX) / Math.max(swN, 1e-6);
+  const loCross  = dxSigned < -xTol;
+  const hiCross  = dxSigned > xTol;
+
+  ctx.save();
+  ctx.lineWidth   = 2;
+  ctx.strokeStyle = mainCol;
+  _line(ctx, hx, sy, hx, hy);
+  ctx.strokeStyle = loCross ? blinkRedYellow(sustainedCues, cueForView('torso_x_left'))  : 'rgb(255,180,0)';
+  _line(ctx, Math.max(0, hx - xTolPx), sy, Math.max(0, hx - xTolPx), hy);
+  ctx.strokeStyle = hiCross ? blinkRedYellow(sustainedCues, cueForView('torso_x_right')) : 'rgb(255,180,0)';
+  _line(ctx, Math.min(w - 1, hx + xTolPx), sy, Math.min(w - 1, hx + xTolPx), hy);
+  ctx.strokeStyle = 'rgb(150,200,240)';
+  ctx.lineWidth = 2;
+  _line(ctx, hx, hy, sx, sy);
+  ctx.restore();
 }
 
 // Shared rail drawing helper
@@ -201,8 +273,6 @@ function _drawRailSide(ctx, shoulder, point, inRatio, outRatio, dxSigned, ok, sw
   ctx.lineWidth   = 1;
   ctx.strokeStyle = col;
   _line(ctx, sx, y0, sx, y1);
-  ctx.fillStyle = col;
-  ctx.beginPath(); ctx.arc(sx, py, 4, 0, Math.PI * 2); ctx.fill();
   ctx.strokeStyle = 'rgb(120,180,230)';
   ctx.lineWidth   = 2;
   _line(ctx, sx, py, px, py);
@@ -232,8 +302,6 @@ function _drawToeRailSide(ctx, anchor, point, loRatio, hiRatio, dxSigned, ok, sw
   ctx.lineWidth = 1;
   ctx.strokeStyle = col;
   _line(ctx, ax, y0, ax, y1);
-  ctx.fillStyle = col;
-  ctx.beginPath(); ctx.arc(ax, py, 4, 0, Math.PI * 2); ctx.fill();
   ctx.strokeStyle = 'rgb(120,180,230)';
   ctx.lineWidth = 2;
   _line(ctx, ax, py, px, py);
@@ -386,10 +454,6 @@ export function drawShoulderLevelGuides(ctx, lsX, lsY, rsX, rsY, swN, dyRatio, w
   _line(ctx, lx, yTop, rx, yTop);
   ctx.strokeStyle = touchBot ? blinkRedYellow(sustainedCues, shlvlKey) : 'rgb(255,180,80)';
   _line(ctx, lx, yBot, rx, yBot);
-  const ptCol = cross ? blinkRedYellow(sustainedCues, shlvlKey) : 'rgb(0,255,0)';
-  ctx.fillStyle = ptCol;
-  ctx.beginPath(); ctx.arc(lx, ly, 4, 0, Math.PI*2); ctx.fill();
-  ctx.beginPath(); ctx.arc(rx, ry, 4, 0, Math.PI*2); ctx.fill();
   ctx.strokeStyle = 'rgb(180,180,180)'; ctx.lineWidth = 1;
   _line(ctx, lx, ly, lx, yRef);
   _line(ctx, rx, ry, rx, yRef);
@@ -473,14 +537,18 @@ export function drawStanceAnkleWidthGuides(ctx, stanceData, w, h) {
 }
 
 // ---------------------------------------------------------------------------
-// drawAllStanceToleranceGuides — combined (exercise-phase form overlays)
+// drawAllStanceToleranceGuides — exercise-phase form overlays only:
+// shoulder level, knee, ankle width, toe, torso left/right.
 // ---------------------------------------------------------------------------
 export function drawAllStanceToleranceGuides(ctx, landmarks, stanceData, w, h, sustainedCues) {
-  const { hip, torso, shlvl, kneeX, kneeY } = stanceData;
-  drawKneeGuides(ctx, landmarks, w, h, sustainedCues);
-  drawHipCenterGuides(ctx, hip.x, hip.y, kneeX, kneeY, hip.sw, hip.dx, w, h, sustainedCues);
-  drawTorsoFrontGuides(ctx, torso.shX, torso.shY, torso.hipX, torso.hipY, torso.sw, torso.dx, torso.vGap, w, h, sustainedCues);
+  const { torso, shlvl } = stanceData;
   drawShoulderLevelGuides(ctx, shlvl.lsx, shlvl.lsy, shlvl.rsx, shlvl.rsy, shlvl.sw, shlvl.dy, w, h, sustainedCues);
+  drawKneeGuides(ctx, landmarks, w, h, sustainedCues);
+  drawAnkleWidthToleranceGuides(ctx, landmarks, w, h);
+  drawFootIndexGuides(ctx, landmarks, w, h, sustainedCues);
+  drawTorsoHorizontalGuides(
+    ctx, torso.shX, torso.shY, torso.hipX, torso.hipY, torso.sw, torso.dx, w, h, sustainedCues,
+  );
 }
 
 // ---------------------------------------------------------------------------
@@ -598,14 +666,9 @@ export function drawSquatProgressDots(ctx, squat, w) {
 }
 
 export function drawSquatRepOverlay(ctx, squat, hipX, hipY, kneeX, kneeY, swN, w, h) {
+  // Live workout: only the too-deep tolerance line (no start/partial/full/tracker/dots).
   const geom = squatRepGeometry(squat, hipX, hipY, kneeX, kneeY, swN, w, h);
-  drawSquatStartLine(ctx, squat, geom);
-  drawSquatPartialDepthLine(ctx, geom);
-  drawSquatFullDepthLine(ctx, squat, geom);
   drawSquatTooDeepLine(ctx, squat, geom);
-  drawSquatHipKneeTracker(ctx, squat, geom);
-  drawSquatRepCounter(ctx, squat);
-  drawSquatProgressDots(ctx, squat, w);
 }
 
 // ---------------------------------------------------------------------------
