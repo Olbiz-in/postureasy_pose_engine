@@ -377,6 +377,7 @@ export function drawShoulderLevelGuides(ctx, lsX, lsY, rsX, rsY, swN, dyRatio, w
   const shlvlKey = cueForView(ly < ry ? 'shoulder_high_left' : 'shoulder_high_right');
   const refCol   = cross ? blinkRedYellow(sustainedCues, shlvlKey) : 'rgb(120,200,255)';
 
+  
   ctx.save();
   ctx.lineWidth   = 2;
   ctx.strokeStyle = refCol;
