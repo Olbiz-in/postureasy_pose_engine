@@ -6,10 +6,12 @@ import squat from './squat/index.js';
 import squatSide from './squatSide/index.js';
 import pushup from './pushup/index.js';
 import pushupSide from './pushupSide/index.js';
+import shoulderPress from './shoulderPress/index.js';
 
 registerExercise(squat);
 registerExercise(squatSide);
 registerExercise(pushup);
 registerExercise(pushupSide);
+registerExercise(shoulderPress);
 
-export { squat, squatSide, pushup, pushupSide };
+export { squat, squatSide, pushup, pushupSide, shoulderPress };

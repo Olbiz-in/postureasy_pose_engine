@@ -37,6 +37,10 @@ export function useLiveExercise({
   mirrored = true,
   voice = false,
   uiHz = 8,
+  /** Planned rep count for this set — forwarded to the exercise flow. */
+  targetReps = 0,
+  /** When set, play this video URL instead of opening the webcam (debug / offline). */
+  videoSrc = null,
   onRepCountChange,
   onStateChange,
   onRepComplete,
@@ -60,6 +64,8 @@ export function useLiveExercise({
   const onRepCountChangeRef = useRef(onRepCountChange);
   const onStateChangeRef = useRef(onStateChange);
   const onRepCompleteRef = useRef(onRepComplete);
+  const mirroredRef = useRef(mirrored);
+  useEffect(() => { mirroredRef.current = mirrored; }, [mirrored]);
   useEffect(() => { onRepCountChangeRef.current = onRepCountChange; }, [onRepCountChange]);
   useEffect(() => { onStateChangeRef.current = onStateChange; }, [onStateChange]);
   useEffect(() => { onRepCompleteRef.current = onRepComplete; }, [onRepComplete]);
@@ -70,6 +76,13 @@ export function useLiveExercise({
     if (streamRef.current) {
       streamRef.current.getTracks().forEach((t) => t.stop());
       streamRef.current = null;
+    }
+    const video = videoRef.current;
+    if (video) {
+      try { video.pause(); } catch { /* noop */ }
+      video.removeAttribute('src');
+      video.srcObject = null;
+      try { video.load(); } catch { /* noop */ }
     }
   }, []);
 
@@ -83,9 +96,11 @@ export function useLiveExercise({
 
     let cancelled = false;
     const def = getExercise(exerciseId);
-    trackerRef.current = def.create({ voice });
+    const reps = Number(targetReps) > 0 ? Number(targetReps) : 0;
+    trackerRef.current = def.create({ voice, targetReps: reps });
     setState(IDLE_STATE);
     lastRepRef.current = 0;
+    lastTsRef.current = 0;
     setStatus('loading');
     setError(null);
 
@@ -109,44 +124,79 @@ export function useLiveExercise({
       }
       if (cancelled) return;
 
-      // 2) Webcam.
-      if (!navigator.mediaDevices?.getUserMedia) {
-        fail('This browser has no camera access. Use a recent Chrome/Edge over http://localhost or HTTPS.');
-        return;
-      }
-      let stream;
-      try {
-        stream = await navigator.mediaDevices.getUserMedia({
-          video: { facingMode: 'user', width: { ideal: 640 }, height: { ideal: 480 } },
-          audio: false,
-        });
-      } catch (err) {
-        const name = err?.name || '';
-        const msg =
-          name === 'NotAllowedError' || name === 'SecurityError'
-            ? 'Camera permission was blocked. Allow camera access for this site and retry.'
-            : name === 'NotReadableError'
-              ? 'The camera is in use by another app. Close it (Zoom, Teams, Camera app…) and retry.'
-              : name === 'NotFoundError' || name === 'OverconstrainedError'
-                ? 'No camera was found. Connect a webcam and retry.'
-                : err?.message || 'Could not start the camera.';
-        fail(msg, err);
-        return;
-      }
-      if (cancelled) { stream.getTracks().forEach((t) => t.stop()); return; }
-      streamRef.current = stream;
+      const video = videoRef.current;
+      if (!video) return;
 
-      // 3) Bind + play.
+      // 2) Source: uploaded debug video OR webcam.
       try {
-        const video = videoRef.current;
-        if (!video) return;
-        video.srcObject = stream;
-        await video.play();
+        if (videoSrc) {
+          video.srcObject = null;
+          video.loop = true;
+          video.muted = true;
+          video.playsInline = true;
+          video.src = videoSrc;
+          await new Promise((resolve, reject) => {
+            const onReady = () => {
+              cleanup();
+              resolve();
+            };
+            const onErr = () => {
+              cleanup();
+              reject(new Error('Could not load the uploaded video.'));
+            };
+            const cleanup = () => {
+              video.removeEventListener('loadeddata', onReady);
+              video.removeEventListener('error', onErr);
+            };
+            if (video.readyState >= 2) {
+              resolve();
+              return;
+            }
+            video.addEventListener('loadeddata', onReady);
+            video.addEventListener('error', onErr);
+          });
+          if (cancelled) return;
+          await video.play();
+        } else {
+          if (!navigator.mediaDevices?.getUserMedia) {
+            fail('This browser has no camera access. Use a recent Chrome/Edge over http://localhost or HTTPS.');
+            return;
+          }
+          let stream;
+          try {
+            stream = await navigator.mediaDevices.getUserMedia({
+              video: { facingMode: 'user', width: { ideal: 640 }, height: { ideal: 480 } },
+              audio: false,
+            });
+          } catch (err) {
+            const name = err?.name || '';
+            const msg =
+              name === 'NotAllowedError' || name === 'SecurityError'
+                ? 'Camera permission was blocked. Allow camera access for this site and retry.'
+                : name === 'NotReadableError'
+                  ? 'The camera is in use by another app. Close it (Zoom, Teams, Camera app…) and retry.'
+                  : name === 'NotFoundError' || name === 'OverconstrainedError'
+                    ? 'No camera was found. Connect a webcam and retry.'
+                    : err?.message || 'Could not start the camera.';
+            fail(msg, err);
+            return;
+          }
+          if (cancelled) { stream.getTracks().forEach((t) => t.stop()); return; }
+          streamRef.current = stream;
+          video.loop = false;
+          video.srcObject = stream;
+          await video.play();
+        }
         if (cancelled) return;
         setStatus('running');
         loop();
       } catch (err) {
-        fail(err?.message || 'Could not start the video preview.', err);
+        fail(
+          videoSrc
+            ? (err?.message || 'Could not play the uploaded video.')
+            : (err?.message || 'Could not start the video preview.'),
+          err,
+        );
       }
     }
 
@@ -173,7 +223,7 @@ export function useLiveExercise({
           /* skip this frame on transient detector errors */
         }
 
-        const frame = { width: canvas.width, height: canvas.height, timestamp: ts };
+        const frame = { width: canvas.width, height: canvas.height, timestamp: ts, mirrored: mirroredRef.current };
         const ctx = canvas.getContext('2d');
 
         let next = null;
@@ -224,7 +274,14 @@ export function useLiveExercise({
       try { trackerRef.current?.reset?.(); } catch { /* noop */ }
       stop();
     };
-  }, [active, exerciseId, voice, uiHz, stop]);
+  }, [active, exerciseId, voice, uiHz, videoSrc, targetReps, stop]);
+
+  // Keep the live tracker in sync if the planned rep count changes mid-session.
+  useEffect(() => {
+    const tracker = trackerRef.current;
+    if (!tracker || typeof tracker.setTargetReps !== 'function') return;
+    tracker.setTargetReps(Number(targetReps) > 0 ? Number(targetReps) : 0);
+  }, [targetReps]);
 
   // Release the (heavy) landmarker only when the hook unmounts entirely.
   useEffect(() => () => {

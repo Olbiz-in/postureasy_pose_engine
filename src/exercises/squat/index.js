@@ -23,6 +23,10 @@ function createSquatTracker(options = {}) {
       lastFr = null;
     },
 
+    setTargetReps(n) {
+      flow.setTargetReps(n);
+    },
+
     update(landmarks, frame) {
       lastFr = flow.tick(landmarks, frame.width, frame.height);
       const state = flow.toTrackerState(lastFr);

@@ -31,6 +31,8 @@ export {
 export {
   SQUAT_TOLERANCE_GROUPS,
   PUSHUP_TOLERANCE_GROUPS,
+  SHOULDER_PRESS_TOLERANCE_GROUPS,
   getSquatToleranceConfig,
   getPushUpToleranceConfig,
+  getShoulderPressToleranceConfig,
 } from './exercises/toleranceDefinitions.js';

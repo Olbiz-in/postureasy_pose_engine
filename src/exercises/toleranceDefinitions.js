@@ -3,6 +3,7 @@
 
 import { CFG, CFG_DEFAULTS, resetSquatCfg } from './squat/config.js';
 import { PUSHUP_CFG } from './pushup/config.js';
+import { SP_CFG, SP_CFG_DEFAULTS, resetShoulderPressCfg } from './shoulderPress/config.js';
 
 export const PUSHUP_CFG_DEFAULTS = {
   wrist_align_ratio_max: 0.06,
@@ -71,6 +72,52 @@ export const PUSHUP_TOLERANCE_GROUPS = [
     ],
   },
 ];
+
+export const SHOULDER_PRESS_TOLERANCE_GROUPS = [
+  {
+    title: 'Feet (shoulder width)',
+    color: '#56cf7b',
+    sliders: [
+      { key: 'stance_narrow_tolerance', label: 'Feet too close', min: 0.1, max: 0.6, step: 0.01 },
+      { key: 'stance_wide_tolerance', label: 'Feet too wide', min: 0.1, max: 0.8, step: 0.01 },
+    ],
+  },
+  {
+    title: 'Shoulder bend (setup)',
+    color: '#5b8dee',
+    sliders: [
+      { key: 'torso_lean_ratio_max', label: 'Side bend tolerance', min: 0.06, max: 0.4, step: 0.005 },
+      { key: 'shoulder_level_ratio_max', label: 'Shoulder level tolerance', min: 0.04, max: 0.3, step: 0.005 },
+      { key: 'shrug_ratio_min', label: 'Shrug during press (0 = off)', min: 0, max: 0.9, step: 0.05 },
+    ],
+  },
+  {
+    title: 'Arm Path',
+    color: '#4ecdc4',
+    sliders: [
+      { key: 'forearm_inner_tolerance', label: 'Wrist drift inward', min: 0.05, max: 0.4, step: 0.01 },
+      { key: 'forearm_outer_tolerance', label: 'Wrist drift outward', min: 0.05, max: 0.4, step: 0.01 },
+      { key: 'elbow_tuck_min_ratio', label: 'Elbow tuck (min out)', min: 0, max: 0.6, step: 0.01 },
+      { key: 'top_wide_ratio_max', label: 'Top width (max out)', min: 0.2, max: 1.0, step: 0.01 },
+      { key: 'symmetry_ratio_max', label: 'Left/right evenness', min: 0.08, max: 0.5, step: 0.01 },
+    ],
+  },
+  {
+    title: 'Depth & Height',
+    color: '#f59e0b',
+    sliders: [
+      { key: 'depth_elbow_high_ratio', label: 'Elbows above shoulder (max)', min: 0, max: 0.5, step: 0.01 },
+      { key: 'depth_elbow_low_ratio', label: 'Too low below shoulder', min: 0.1, max: 0.8, step: 0.01 },
+      { key: 'top_height_ratio', label: 'Target height (arm length)', min: 0.5, max: 1.0, step: 0.01 },
+      { key: 'lockout_angle_min', label: 'Lockout elbow angle (°)', min: 140, max: 178, step: 1 },
+      { key: 'rep_min_sec', label: 'Min rep time (s)', min: 0.5, max: 3, step: 0.1 },
+    ],
+  },
+];
+
+export function getShoulderPressToleranceConfig() {
+  return { CFG: SP_CFG, defaults: SP_CFG_DEFAULTS, reset: resetShoulderPressCfg };
+}
 
 export function getSquatToleranceConfig() {
   return { CFG, defaults: CFG_DEFAULTS, reset: resetSquatCfg };

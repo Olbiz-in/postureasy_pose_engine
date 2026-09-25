@@ -65,7 +65,8 @@ export function resolveExerciseId(nameOrId, view) {
   // variant (e.g. "Decline Push-ups", "Goblet Squat") maps to that family so the
   // matching tracker is used. Unrelated movements stay unsupported.
   if (!baseId) {
-    if (key.includes('squat')) baseId = _aliasIndex.get('squat') || 'squat';
+    if (/(shoulder|overhead)\s*press/.test(key)) baseId = _aliasIndex.get('shoulder press') || null;
+    else if (key.includes('squat')) baseId = _aliasIndex.get('squat') || 'squat';
     else if (key.includes('push')) baseId = _aliasIndex.get('pushup') || 'pushup';
   }
 
