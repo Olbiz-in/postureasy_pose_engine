@@ -7,6 +7,23 @@ import { drawSkeleton } from '../core/drawSkeleton';
 import { trackingSettings } from '../core/trackingSettings';
 import { resolveExerciseId, getExercise } from '../core/registry';
 
+const CAMERA_TIMEOUT_MS = 20000;
+const PLAY_TIMEOUT_MS = 10000;
+
+// Embedded WebViews can leave getUserMedia/play() pending forever (e.g. an
+// unanswered permission prompt), so bound them to surface a real error.
+function withTimeout(promise, ms, message) {
+  let timer;
+  const timeout = new Promise((_, reject) => {
+    timer = setTimeout(() => {
+      const err = new Error(message);
+      err.name = 'TimeoutError';
+      reject(err);
+    }, ms);
+  });
+  return Promise.race([promise, timeout]).finally(() => clearTimeout(timer));
+}
+
 const IDLE_STATE = {
   repCount: 0,
   phase: 'idle',
@@ -39,6 +56,10 @@ export function useLiveExercise({
   uiHz = 8,
   /** Planned rep count for this set — forwarded to the exercise flow. */
   targetReps = 0,
+  /** Planned set count — only used by trackers that manage their own sets. */
+  targetSets = 0,
+  /** Rest between sets (s) — only used by trackers that manage their own sets. */
+  restSeconds = 0,
   /** When set, play this video URL instead of opening the webcam (debug / offline). */
   videoSrc = null,
   onRepCountChange,
@@ -97,7 +118,12 @@ export function useLiveExercise({
     let cancelled = false;
     const def = getExercise(exerciseId);
     const reps = Number(targetReps) > 0 ? Number(targetReps) : 0;
-    trackerRef.current = def.create({ voice, targetReps: reps });
+    trackerRef.current = def.create({
+      voice,
+      targetReps: reps,
+      targetSets: Number(targetSets) > 0 ? Number(targetSets) : 0,
+      restSeconds: Number(restSeconds) > 0 ? Number(restSeconds) : 0,
+    });
     setState(IDLE_STATE);
     lastRepRef.current = 0;
     lastTsRef.current = 0;
@@ -164,10 +190,14 @@ export function useLiveExercise({
           }
           let stream;
           try {
-            stream = await navigator.mediaDevices.getUserMedia({
-              video: { facingMode: 'user', width: { ideal: 640 }, height: { ideal: 480 } },
-              audio: false,
-            });
+            stream = await withTimeout(
+              navigator.mediaDevices.getUserMedia({
+                video: { facingMode: 'user', width: { ideal: 640 }, height: { ideal: 480 } },
+                audio: false,
+              }),
+              CAMERA_TIMEOUT_MS,
+              'The camera did not respond. Check camera permission for this app and retry.',
+            );
           } catch (err) {
             const name = err?.name || '';
             const msg =
@@ -185,7 +215,7 @@ export function useLiveExercise({
           streamRef.current = stream;
           video.loop = false;
           video.srcObject = stream;
-          await video.play();
+          await withTimeout(video.play(), PLAY_TIMEOUT_MS, 'The camera preview did not start.');
         }
         if (cancelled) return;
         setStatus('running');
@@ -274,7 +304,7 @@ export function useLiveExercise({
       try { trackerRef.current?.reset?.(); } catch { /* noop */ }
       stop();
     };
-  }, [active, exerciseId, voice, uiHz, videoSrc, targetReps, stop]);
+  }, [active, exerciseId, voice, uiHz, videoSrc, targetReps, targetSets, restSeconds, stop]);
 
   // Keep the live tracker in sync if the planned rep count changes mid-session.
   useEffect(() => {
@@ -289,5 +319,8 @@ export function useLiveExercise({
     landmarkerRef.current = null;
   }, []);
 
-  return { videoRef, canvasRef, status, error, state, mirrored, exerciseId, stop };
+  /** Live tracker instance, for trackers with extra commands (e.g. finish()). */
+  const getTracker = useCallback(() => trackerRef.current, []);
+
+  return { videoRef, canvasRef, status, error, state, mirrored, exerciseId, stop, getTracker };
 }

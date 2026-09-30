@@ -37,9 +37,13 @@ export const SP_CFG_DEFAULTS = {
   shrug_ratio_min: 0.55,
 
   // ── Arm path ─────────────────────────────────────────────────────────────
-  // Wrist must stay stacked over the elbow: signed outward wrist-vs-elbow / sw.
-  forearm_inner_tolerance: 0.15,
-  forearm_outer_tolerance: 0.15,
+  // Wrist stacked over the elbow: forearm tilt from vertical (degrees, smoothed).
+  // A gripped dumbbell makes the wrist landmark jitter, so this is angle-based
+  // and ignored when the forearm points at the camera (too short vertically).
+  forearm_tilt_inner_deg: 25,
+  forearm_tilt_outer_deg: 25,
+  forearm_min_vertical_ratio: 0.35, // wrist must be this far above the elbow (/ sw) to judge
+  forearm_smooth_alpha: 0.3,
   // Bottom position: elbow must sit at least this far outside the shoulder
   // (outward / sw). Smaller → elbows tucked in front of the chest.
   elbow_tuck_min_ratio: 0.25,

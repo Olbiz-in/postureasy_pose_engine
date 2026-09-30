@@ -66,6 +66,7 @@ export function resolveExerciseId(nameOrId, view) {
   // matching tracker is used. Unrelated movements stay unsupported.
   if (!baseId) {
     if (/(shoulder|overhead)\s*press/.test(key)) baseId = _aliasIndex.get('shoulder press') || null;
+    else if (/lateral\s*raise/.test(key)) baseId = _aliasIndex.get('lateral raise') || null;
     else if (key.includes('squat')) baseId = _aliasIndex.get('squat') || 'squat';
     else if (key.includes('push')) baseId = _aliasIndex.get('pushup') || 'pushup';
   }

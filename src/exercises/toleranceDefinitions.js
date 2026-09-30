@@ -4,6 +4,7 @@
 import { CFG, CFG_DEFAULTS, resetSquatCfg } from './squat/config.js';
 import { PUSHUP_CFG } from './pushup/config.js';
 import { SP_CFG, SP_CFG_DEFAULTS, resetShoulderPressCfg } from './shoulderPress/config.js';
+import { LR_CFG, LR_CFG_DEFAULTS, resetLateralRaiseCfg } from './lateralRaise/config.js';
 
 export const PUSHUP_CFG_DEFAULTS = {
   wrist_align_ratio_max: 0.06,
@@ -95,8 +96,8 @@ export const SHOULDER_PRESS_TOLERANCE_GROUPS = [
     title: 'Arm Path',
     color: '#4ecdc4',
     sliders: [
-      { key: 'forearm_inner_tolerance', label: 'Wrist drift inward', min: 0.05, max: 0.4, step: 0.01 },
-      { key: 'forearm_outer_tolerance', label: 'Wrist drift outward', min: 0.05, max: 0.4, step: 0.01 },
+      { key: 'forearm_tilt_inner_deg', label: 'Wrist tilt inward (°)', min: 5, max: 45, step: 1 },
+      { key: 'forearm_tilt_outer_deg', label: 'Wrist tilt outward (°)', min: 5, max: 45, step: 1 },
       { key: 'elbow_tuck_min_ratio', label: 'Elbow tuck (min out)', min: 0, max: 0.6, step: 0.01 },
       { key: 'top_wide_ratio_max', label: 'Top width (max out)', min: 0.2, max: 1.0, step: 0.01 },
       { key: 'symmetry_ratio_max', label: 'Left/right evenness', min: 0.08, max: 0.5, step: 0.01 },
@@ -114,6 +115,54 @@ export const SHOULDER_PRESS_TOLERANCE_GROUPS = [
     ],
   },
 ];
+
+export const LATERAL_RAISE_TOLERANCE_GROUPS = [
+  {
+    title: 'Stance (setup)',
+    color: '#56cf7b',
+    sliders: [
+      { key: 'stance_min', label: 'Feet min (× shoulder width)', min: 0.5, max: 1.2, step: 0.01 },
+      { key: 'stance_max', label: 'Feet max (× shoulder width)', min: 1.0, max: 2.0, step: 0.01 },
+      { key: 'upright_lean_max', label: 'Upright lean tolerance', min: 0.08, max: 0.5, step: 0.01 },
+      { key: 'facing_min_ratio', label: 'Facing camera (min ratio)', min: 0.6, max: 0.98, step: 0.01 },
+    ],
+  },
+  {
+    title: 'Shoulder Line (reps)',
+    color: '#4ecdc4',
+    sliders: [
+      { key: 'top_tolerance', label: 'Top: elbow below line (max)', min: 0.02, max: 0.35, step: 0.005 },
+      { key: 'lift_start', label: 'Rep start (lift fraction)', min: 0.2, max: 0.7, step: 0.01 },
+      { key: 'lift_return', label: 'Rep end (lift fraction)', min: 0.05, max: 0.5, step: 0.01 },
+      { key: 'pair_window_sec', label: 'Both-arm window (s)', min: 0.2, max: 2.0, step: 0.05 },
+    ],
+  },
+  {
+    title: 'Form Rules',
+    color: '#f59e0b',
+    sliders: [
+      { key: 'wrist_above_tolerance', label: 'Wrist above line (max)', min: 0, max: 0.3, step: 0.005 },
+      { key: 'elbow_above_tolerance', label: 'Elbow above line (max)', min: 0, max: 0.4, step: 0.005 },
+      { key: 'shoulder_tilt_max', label: 'Shoulder tilt (max)', min: 0.03, max: 0.3, step: 0.005 },
+      { key: 'body_sway_max', label: 'Body sway (max)', min: 0.03, max: 0.4, step: 0.005 },
+      { key: 'symmetry_max', label: 'Left/right height diff (max)', min: 0.03, max: 0.4, step: 0.005 },
+      { key: 'clean_score_min', label: 'Clean rep min score', min: 50, max: 95, step: 1 },
+    ],
+  },
+  {
+    title: 'Activity',
+    color: '#5b8dee',
+    sliders: [
+      { key: 'idle_seconds', label: 'Idle after (s)', min: 0.5, max: 6, step: 0.1 },
+      { key: 'turn_ratio', label: 'Turned-away ratio', min: 0.3, max: 0.9, step: 0.01 },
+      { key: 'long_idle_seconds', label: 'Pause timer after (s)', min: 5, max: 120, step: 1 },
+    ],
+  },
+];
+
+export function getLateralRaiseToleranceConfig() {
+  return { CFG: LR_CFG, defaults: LR_CFG_DEFAULTS, reset: resetLateralRaiseCfg };
+}
 
 export function getShoulderPressToleranceConfig() {
   return { CFG: SP_CFG, defaults: SP_CFG_DEFAULTS, reset: resetShoulderPressCfg };

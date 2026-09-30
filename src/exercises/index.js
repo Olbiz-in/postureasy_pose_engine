@@ -7,11 +7,13 @@ import squatSide from './squatSide/index.js';
 import pushup from './pushup/index.js';
 import pushupSide from './pushupSide/index.js';
 import shoulderPress from './shoulderPress/index.js';
+import lateralRaise from './lateralRaise/index.js';
 
 registerExercise(squat);
 registerExercise(squatSide);
 registerExercise(pushup);
 registerExercise(pushupSide);
 registerExercise(shoulderPress);
+registerExercise(lateralRaise);
 
-export { squat, squatSide, pushup, pushupSide, shoulderPress };
+export { squat, squatSide, pushup, pushupSide, shoulderPress, lateralRaise };

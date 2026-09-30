@@ -39,6 +39,20 @@ function getFileset(wasmBase) {
   return filesetPromise;
 }
 
+const FILESET_TIMEOUT_MS = 45000;
+const GPU_INIT_TIMEOUT_MS = 20000;
+const CPU_INIT_TIMEOUT_MS = 45000;
+
+// The WebGL delegate can stall forever on some Android WebViews instead of
+// rejecting, which would otherwise leave callers stuck in "loading".
+function withTimeout(promise, ms, label) {
+  let timer;
+  const timeout = new Promise((_, reject) => {
+    timer = setTimeout(() => reject(new Error(`${label} timed out after ${ms / 1000}s`)), ms);
+  });
+  return Promise.race([promise, timeout]).finally(() => clearTimeout(timer));
+}
+
 /** Coerce MediaPipe's varied throw shapes (string | Event | Error) into an Error. */
 function toError(err, context) {
   if (err instanceof Error) return err;
@@ -60,22 +74,26 @@ export async function createPoseLandmarker(options = {}) {
 
   let vision;
   try {
-    vision = await getFileset(cfg.wasmBase);
+    vision = await withTimeout(getFileset(cfg.wasmBase), FILESET_TIMEOUT_MS, 'Loading the pose runtime');
   } catch (err) {
     filesetPromise = null; // allow a retry on the next attempt
     throw toError(err, 'Failed to load the pose-detection runtime (check your connection)');
   }
 
   const build = (delegate) =>
-    PoseLandmarker.createFromOptions(vision, {
-      baseOptions: { modelAssetPath: cfg.modelUrl, delegate },
-      runningMode: 'VIDEO',
-      numPoses: cfg.numPoses,
-      minPoseDetectionConfidence: cfg.minPoseDetectionConfidence,
-      minPosePresenceConfidence: cfg.minPosePresenceConfidence,
-      minTrackingConfidence: cfg.minTrackingConfidence,
-      outputSegmentationMasks: false,
-    });
+    withTimeout(
+      PoseLandmarker.createFromOptions(vision, {
+        baseOptions: { modelAssetPath: cfg.modelUrl, delegate },
+        runningMode: 'VIDEO',
+        numPoses: cfg.numPoses,
+        minPoseDetectionConfidence: cfg.minPoseDetectionConfidence,
+        minPosePresenceConfidence: cfg.minPosePresenceConfidence,
+        minTrackingConfidence: cfg.minTrackingConfidence,
+        outputSegmentationMasks: false,
+      }),
+      delegate === 'GPU' ? GPU_INIT_TIMEOUT_MS : CPU_INIT_TIMEOUT_MS,
+      `Loading the pose model (${delegate})`,
+    );
 
   try {
     return await build(cfg.delegate);

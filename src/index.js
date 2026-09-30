@@ -32,7 +32,21 @@ export {
   SQUAT_TOLERANCE_GROUPS,
   PUSHUP_TOLERANCE_GROUPS,
   SHOULDER_PRESS_TOLERANCE_GROUPS,
+  LATERAL_RAISE_TOLERANCE_GROUPS,
   getSquatToleranceConfig,
   getPushUpToleranceConfig,
   getShoulderPressToleranceConfig,
+  getLateralRaiseToleranceConfig,
 } from './exercises/toleranceDefinitions.js';
+
+export {
+  LR_CFG,
+  LR_CFG_DEFAULTS,
+  LR_SCORE_WEIGHTS,
+  LR_SCORE_WEIGHTS_DEFAULTS,
+  resetLateralRaiseCfg,
+  resetLateralRaiseWeights,
+  setLateralRaiseDebug,
+} from './exercises/lateralRaise/config.js';
+export { LR_PHASE, LR_ACTIVITY } from './exercises/lateralRaise/LateralRaiseFlow.js';
+export { summarizeLateralRaise } from './exercises/lateralRaise/LateralRaiseRepTracker.js';

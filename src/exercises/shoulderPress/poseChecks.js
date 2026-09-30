@@ -209,34 +209,44 @@ export function armsResting(g) {
   return lowL && lowR && !isRacked(g);
 }
 
-function forearmBand(side) {
-  return {
-    lo: -SP_CFG.forearm_inner_tolerance,
-    hi: SP_CFG.forearm_outer_tolerance,
-    side,
-  };
+/**
+ * Signed forearm tilt from vertical for one arm (degrees, + = wrist outward).
+ * `smooth` (optional, mutable { left, right }) holds an EMA across frames.
+ */
+function forearmSide(g, side, smooth) {
+  const elbow = side === 'left' ? g.le : g.re;
+  const wrist = side === 'left' ? g.lw : g.rw;
+  const s = side === 'left' ? g.outSign : -g.outSign;
+  const dxPx = (wrist.x - elbow.x) * s;
+  const vert = elbow.y - wrist.y; // px the wrist sits above the elbow
+  const lo = -SP_CFG.forearm_tilt_inner_deg;
+  const hi = SP_CFG.forearm_tilt_outer_deg;
+
+  if (vert < SP_CFG.forearm_min_vertical_ratio * g.sw) {
+    if (smooth) smooth[side] = null;
+    return { side, valid: false, tilt: 0, lo, hi, vert, ok: true };
+  }
+
+  let tilt = (Math.atan2(dxPx, vert) * 180) / Math.PI;
+  if (smooth) {
+    const prev = smooth[side];
+    const a = SP_CFG.forearm_smooth_alpha;
+    tilt = prev == null ? tilt : a * tilt + (1 - a) * prev;
+    smooth[side] = tilt;
+  }
+  return { side, valid: true, tilt, lo, hi, vert, ok: tilt >= lo && tilt <= hi };
 }
 
-export function checkForearms(g) {
-  const lDx = outward(g, 'left', g.lw, g.le);
-  const rDx = outward(g, 'right', g.rw, g.re);
-  const lBand = forearmBand('left');
-  const rBand = forearmBand('right');
+export function checkForearms(g, smooth = null) {
+  const left = forearmSide(g, 'left', smooth);
+  const right = forearmSide(g, 'right', smooth);
   const cueKeys = [];
-  if (lDx < lBand.lo) cueKeys.push('sp_forearm_left_inner');
-  else if (lDx > lBand.hi) cueKeys.push('sp_forearm_left_outer');
-  if (rDx < rBand.lo) cueKeys.push('sp_forearm_right_inner');
-  else if (rDx > rBand.hi) cueKeys.push('sp_forearm_right_outer');
+  if (!left.ok) cueKeys.push(left.tilt < left.lo ? 'sp_forearm_left_inner' : 'sp_forearm_left_outer');
+  if (!right.ok) cueKeys.push(right.tilt < right.lo ? 'sp_forearm_right_inner' : 'sp_forearm_right_outer');
   const near =
-    (lDx >= lBand.lo && lDx <= lBand.hi && nearEdge(lDx, lBand.lo, lBand.hi)) ||
-    (rDx >= rBand.lo && rDx <= rBand.hi && nearEdge(rDx, rBand.lo, rBand.hi));
-  return {
-    ok: cueKeys.length === 0,
-    left: { dx: lDx, ...lBand, ok: lDx >= lBand.lo && lDx <= lBand.hi },
-    right: { dx: rDx, ...rBand, ok: rDx >= rBand.lo && rDx <= rBand.hi },
-    cueKeys,
-    near,
-  };
+    (left.valid && left.ok && nearEdge(left.tilt, left.lo, left.hi)) ||
+    (right.valid && right.ok && nearEdge(right.tilt, right.lo, right.hi));
+  return { ok: cueKeys.length === 0, left, right, cueKeys, near };
 }
 
 export function checkElbowTuck(g) {
@@ -287,10 +297,10 @@ export function pressLines(g, armLenRef) {
  * Live posture during reps. Feet / torso lean / shoulder level are locked in
  * setup and are intentionally NOT re-checked here (only press-path cues).
  */
-export function evaluatePressPosture(g, { baseline, zone }) {
+export function evaluatePressPosture(g, { baseline, zone, forearmSmooth = null }) {
   const shrug = checkShrug(g, baseline);
   const symmetry = checkSymmetry(g);
-  const forearm = zone === 'top' ? { ok: true, cueKeys: [], near: false } : checkForearms(g);
+  const forearm = zone === 'top' ? { ok: true, cueKeys: [], near: false } : checkForearms(g, forearmSmooth);
   const elbow = zone === 'bottom' ? checkElbowTuck(g) : { ok: true, cueKeys: [] };
   const top = zone === 'top' ? checkTopWidth(g) : { ok: true, cueKeys: [] };
 

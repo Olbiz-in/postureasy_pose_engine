@@ -78,6 +78,7 @@ function createShoulderPressTracker(options = {}) {
         const armLen = flow._rep.armLenRef(g);
         drawAllToleranceGuides(ctx, g, h, mirrored, {
           posture: fr.postureResult,
+          alertKeys: new Set(fr.sustainedCues || []),
           showStance: false,
           showShoulders: true,
           showArms: true,
