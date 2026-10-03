@@ -67,8 +67,12 @@ export function resolveExerciseId(nameOrId, view) {
   if (!baseId) {
     if (/(shoulder|overhead)\s*press/.test(key)) baseId = _aliasIndex.get('shoulder press') || null;
     else if (/lateral\s*raise/.test(key)) baseId = _aliasIndex.get('lateral raise') || null;
+    else if (/front\s*raise/.test(key) && !/alternat|seated|plate|barbell|cable/.test(key)) baseId = _aliasIndex.get('front raise') || null;
     else if (key.includes('squat')) baseId = _aliasIndex.get('squat') || 'squat';
     else if (key.includes('push')) baseId = _aliasIndex.get('pushup') || 'pushup';
+    else if (/(dumbbell|bicep|biceps|hammer)\s*curl/.test(key) && !/concentration|preacher|cable|barbell|spider|incline/.test(key)) {
+      baseId = _aliasIndex.get('dumbbell curl') || null;
+    }
   }
 
   if (!baseId || !_exercises.has(baseId) || !view) return baseId;

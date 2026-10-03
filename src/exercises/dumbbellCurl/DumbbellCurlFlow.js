@@ -1,85 +1,83 @@
-// Dumbbell lateral raise (front view) — coaching state machine.
+// Dumbbell curl (front view) — coaching state machine.
 //
 // Phases:
-//   SETUP_STANCE       — upright, feet ≈ shoulder width, arms down, facing the
-//                        camera, held ~1 s → calibration (shoulder width,
-//                        resting elbow / wrist height, shoulder tilt baseline)
-//   READY              — short settle (lets the stance voice line finish)
-//   ACTIVE             — rep counting per set; says "Rep N" after each rep
+//   SETUP_STANCE       — upright, feet ≈ shoulder width, arms hanging down,
+//                        facing the camera, held ~1 s → calibration (shoulder
+//                        width, torso length, resting wrist / elbow height,
+//                        REST_SPAN per arm, resting elbow–hip offset, tilt)
+//   READY              — short settle, then rep counting starts
+//   ACTIVE             — rep counting per set
 //   REST_BETWEEN_SETS  — not scored; resumes via continueNextSet() or
 //                        automatically once back in stance after the rest time
 //   COMPLETE           — all sets done, or finish() (Stop) was called
 //
 // Only rep windows are scored. Time spent NOT DOING EXERCISE (arms resting,
 // turned away, out of frame) never counts toward active time or any metric.
+//
+// Voice policy: only "stance correct", rep counts, set complete, rest prompts
+// and next-set starts are spoken (the app speaks the final summary). Form
+// mistakes and stance corrections are on-screen text only.
 
 import { VoiceManager } from '../../core/voiceManager.js';
 import { nowSec } from '../../core/landmarks.js';
 import {
-  LR_CFG, LR_FEEDBACK, LR_VOICE_MSG, LR_STANCE_PRIORITY, LR_TRACKED_LANDMARKS,
-  LR_COLOR_GREEN, LR_COLOR_AMBER, LR_COLOR_RED, LR_COLOR_GREY,
+  DC_CFG, DC_FEEDBACK, DC_VOICE_MSG, DC_STANCE_PRIORITY, DC_LIVE_PRIORITY, DC_TRACKED_LANDMARKS,
+  DC_COLOR_GREEN, DC_COLOR_AMBER, DC_COLOR_RED, DC_COLOR_GREY,
 } from './config.js';
 import { LandmarkSmoother } from '../common/landmarkSmoother.js';
-import { firstByPriority, median, clamp, fmt } from '../common/math.js';
-import { buildGeometry, evaluateStance, facingRatio, armLift } from './poseChecks.js';
-import { LateralRaiseRepTracker, summarizeLateralRaise } from './LateralRaiseRepTracker.js';
+import { firstByPriority, median, clamp, clamp01, fmt } from '../common/math.js';
+import { buildCurlGeometry, evaluateCurlStance, facingRatio, curlProgress } from './poseChecks.js';
+import { DumbbellCurlRepTracker, summarizeDumbbellCurl } from './DumbbellCurlRepTracker.js';
 
-export const LR_PHASE = {
-  SETUP_STANCE: 'lr_setup_stance',
-  READY: 'lr_ready',
-  ACTIVE: 'lr_active',
-  REST_BETWEEN_SETS: 'lr_rest_between_sets',
-  COMPLETE: 'lr_complete',
+export const DC_PHASE = {
+  SETUP_STANCE: 'dc_setup_stance',
+  READY: 'dc_ready',
+  ACTIVE: 'dc_active',
+  REST_BETWEEN_SETS: 'dc_rest_between_sets',
+  COMPLETE: 'dc_complete',
 };
 
-export const LR_ACTIVITY = {
+export const DC_ACTIVITY = {
   EXERCISING: 'exercising',
   NOT_EXERCISING: 'not_exercising',
 };
 
-const VOICE_CD_MS = 10_000;
 const LIVE_CUE_SUSTAIN_SEC = 0.3;
 const LIVE_MISTAKE_HOLD_SEC = 1.5;
 const REP_MISTAKE_HOLD_SEC = 3.0;
-const INSTRUCTION_CONFIRM_SEC = 0.4;
-const INSTRUCTION_MIN_WAIT_SEC = 2.5;
 const FEEDBACK_HOLD_SEC = 2.5;
 const MAX_SW_DECAY = 0.998;
 const CALIB_MAX_SAMPLES = 60;
 
-export class LateralRaiseFlow {
+export class DumbbellCurlFlow {
   constructor({ targetReps = 10, targetSets = 3, restSeconds = null, voice = true } = {}) {
     this._voiceEnabled = voice !== false;
     this._voice = new VoiceManager();
     this._targetReps = targetReps > 0 ? targetReps : 0;
     this._targetSets = targetSets > 0 ? targetSets : (this._targetReps > 0 ? 1 : 0);
     this._restSec = restSeconds > 0 ? restSeconds : null;
-    this._rep = new LateralRaiseRepTracker();
-    this._smoother = new LandmarkSmoother(LR_CFG, LR_TRACKED_LANDMARKS);
+    this._rep = new DumbbellCurlRepTracker();
+    this._smoother = new LandmarkSmoother(DC_CFG, DC_TRACKED_LANDMARKS);
     this._resetState();
   }
 
   _resetState() {
-    this._phase = LR_PHASE.SETUP_STANCE;
+    this._phase = DC_PHASE.SETUP_STANCE;
     this._smoother.reset();
     this._calib = null;
     this._maxSw = 0;
     this._stancePassSince = -1;
     this._calibSamples = [];
-    this._setupBeginSent = false;
-    this._lastInstructionKey = '';
-    this._lastInstructionAt = -1;
-    this._pendingInstructionKey = '';
-    this._pendingInstructionSince = -1;
 
     this._readyStart = -1;
     this._currentSet = 1;
     this._setsCompleted = 0;
     this._restStart = -1;
     this._restResumeSince = -1;
+    this._restOverSpoken = false;
 
-    this._activity = LR_ACTIVITY.NOT_EXERCISING;
-    this._activityReason = 'lr_setup';
+    this._activity = DC_ACTIVITY.NOT_EXERCISING;
+    this._activityReason = 'dc_setup';
     this._lastMoveAt = -Infinity;
     this._notExSince = -1;
     this._lostSince = -1;
@@ -103,12 +101,7 @@ export class LateralRaiseFlow {
     this._debugHeaderSent = false;
   }
 
-  // ── Voice helpers ────────────────────────────────────────────────────────
-  _speak(text, opts) {
-    if (!this._voiceEnabled || !text) return false;
-    return this._voice.speak(text, opts);
-  }
-
+  // ── Voice / text helpers ─────────────────────────────────────────────────
   _speakQueued(text, opts) {
     if (!this._voiceEnabled || !text) return false;
     return this._voice.speakQueued(text, opts);
@@ -118,24 +111,9 @@ export class LateralRaiseFlow {
     return this._voiceEnabled && this._voice.isBusy();
   }
 
-  /** Debounce, say once per key, then give the user time to correct. */
-  _maybeIssueInstruction(key, now) {
-    if (!key) {
-      this._pendingInstructionKey = '';
-      this._pendingInstructionSince = -1;
-      return;
-    }
-    if (this._pendingInstructionKey !== key) {
-      this._pendingInstructionKey = key;
-      this._pendingInstructionSince = now;
-      return;
-    }
-    if (now - this._pendingInstructionSince < INSTRUCTION_CONFIRM_SEC) return;
-    if (this._lastInstructionKey === key) return;
-    if (this._lastInstructionKey && now - this._lastInstructionAt < INSTRUCTION_MIN_WAIT_SEC) return;
-    this._lastInstructionKey = key;
-    this._lastInstructionAt = now;
-    this._speak(LR_VOICE_MSG[key], { key: `lr_instr_${key}`, cooldownMs: VOICE_CD_MS });
+  _issueText(key) {
+    if (key === 'dc_incomplete' && this._rep.mode === 'alternate') return DC_FEEDBACK.dc_incomplete_alt;
+    return DC_FEEDBACK[key] || '';
   }
 
   _sustained(keys, now) {
@@ -145,9 +123,9 @@ export class LateralRaiseFlow {
     return [...active].filter((k) => now - this._cueOnset.get(k) >= LIVE_CUE_SUSTAIN_SEC);
   }
 
-  /** Form mistakes are overlay-only for lateral raise — never voiced. */
+  /** Form mistakes are on-screen only — never voiced. */
   _setMistake(key, now, holdSec) {
-    const text = LR_FEEDBACK[key];
+    const text = this._issueText(key);
     if (!text) return;
     this._mistake = text;
     this._mistakeUntil = now + holdSec;
@@ -186,34 +164,35 @@ export class LateralRaiseFlow {
 
   /** Skip the rest countdown and start the next set now. */
   continueNextSet() {
-    if (this._phase !== LR_PHASE.REST_BETWEEN_SETS) return false;
+    if (this._phase !== DC_PHASE.REST_BETWEEN_SETS) return false;
     this._startNextSet(nowSec());
     return true;
   }
 
   /** Stop: close the session and return the summary of everything done so far. */
   finish() {
-    if (this._phase !== LR_PHASE.COMPLETE) {
+    if (this._phase !== DC_PHASE.COMPLETE) {
       this._stoppedEarly = true;
       this._stoppedInPhase = this._phase;
-      this._rep.abortInProgress();
-      this._phase = LR_PHASE.COMPLETE;
+      this._rep.finalize(this._calib, nowSec());
+      this._phase = DC_PHASE.COMPLETE;
       this._final = this.summary();
     }
     return this._final || this.summary();
   }
 
   summary() {
-    const s = summarizeLateralRaise(this._rep.attempts, {
+    const s = summarizeDumbbellCurl(this._rep.attempts, {
       activeSec: this._activeSec,
       sessionSec: this._sessionSec,
       setsCompleted: this._setsCompleted,
       targetSets: this._targetSets,
       targetReps: this._targetReps,
       stoppedEarly: this._stoppedEarly,
+      mode: this._rep.mode,
     });
     const phase = this._stoppedEarly ? this._stoppedInPhase : this._phase;
-    s.partialSetReps = phase === LR_PHASE.ACTIVE ? this._rep.setCount : 0;
+    s.partialSetReps = phase === DC_PHASE.ACTIVE ? this._rep.setCount : 0;
     s.currentSet = this._currentSet;
     return s;
   }
@@ -226,39 +205,47 @@ export class LateralRaiseFlow {
     this._frameNo += 1;
 
     const pts = this._smoother.update(landmarks, w, h, now);
-    const g = buildGeometry(pts, this._calib);
+    const g = buildCurlGeometry(pts, this._calib);
     if (g) this._lostSince = -1;
     else if (this._lostSince < 0) this._lostSince = now;
-    const lostLong = !g && this._lostSince >= 0 && now - this._lostSince >= LR_CFG.person_lost_sec;
+    const lostLong = !g && this._lostSince >= 0 && now - this._lostSince >= DC_CFG.person_lost_sec;
 
     let fr;
     switch (this._phase) {
-      case LR_PHASE.SETUP_STANCE:
+      case DC_PHASE.SETUP_STANCE:
         fr = this._tickSetup(g, now);
         break;
-      case LR_PHASE.READY:
+      case DC_PHASE.READY:
         fr = this._tickReady(g, now);
         break;
-      case LR_PHASE.ACTIVE:
+      case DC_PHASE.ACTIVE:
         fr = this._tickActive(g, now, dt, lostLong);
         break;
-      case LR_PHASE.REST_BETWEEN_SETS:
+      case DC_PHASE.REST_BETWEEN_SETS:
         fr = this._tickRest(g, now);
         break;
       default:
         fr = this._result(g, now, {
           status: this._stoppedEarly ? 'Session stopped' : 'All sets complete!',
-          activityReason: 'lr_complete',
+          activityReason: 'dc_complete',
         });
     }
 
-    const counting = this._phase !== LR_PHASE.COMPLETE && this._phase !== LR_PHASE.SETUP_STANCE;
+    const counting = this._phase !== DC_PHASE.COMPLETE && this._phase !== DC_PHASE.SETUP_STANCE;
     const longIdle = this._isLongIdle(now);
     if (counting && !longIdle) this._sessionSec += dt;
     fr.timerPaused = longIdle;
 
-    if (LR_CFG.debug) this._debugLog(fr, g, now);
+    if (DC_CFG.debug) this._debugLog(fr, g, now);
     return fr;
+  }
+
+  _armProgress(g) {
+    const p = (side) => {
+      const v = g ? curlProgress(g[side], this._calib) : null;
+      return v == null ? null : clamp01(v);
+    };
+    return { left: p('left'), right: p('right') };
   }
 
   _result(g, now, overrides = {}) {
@@ -268,10 +255,11 @@ export class LateralRaiseFlow {
       poseDetected: !!g,
       geometry: g,
       calib: this._calib,
+      mode: rep.mode,
       status: '',
       statusKind: 'info',
-      boneColor: LR_COLOR_GREEN,
-      activity: LR_ACTIVITY.NOT_EXERCISING,
+      boneColor: DC_COLOR_GREEN,
+      activity: DC_ACTIVITY.NOT_EXERCISING,
       activityReason: this._activityReason,
       feedback: this._currentFeedback(now),
       banner: now <= this._bannerUntil ? this._banner : '',
@@ -283,82 +271,78 @@ export class LateralRaiseFlow {
       targetSets: this._targetSets,
       targetReps: this._targetReps,
       armStates: { left: rep.armState('left'), right: rep.armState('right') },
+      armProgress: this._calib ? this._armProgress(g) : { left: null, right: null },
       stanceResult: null,
       sustainedCues: [],
       restRemainingSec: null,
       lastAttempt: rep.lastAttempt,
-      repCompleted: null,
-      attemptCompleted: null,
+      repsCompleted: [],
+      attemptsCompleted: [],
       ...overrides,
     };
   }
 
   // ── SETUP_STANCE ─────────────────────────────────────────────────────────
   _tickSetup(g, now) {
-    if (!this._setupBeginSent) {
-      this._setupBeginSent = true;
-      this._speak(LR_VOICE_MSG.setup_begin, { key: 'lr_setup_begin', cooldownMs: 0, immediate: true });
-    }
-
     if (!g) {
       this._stancePassSince = -1;
       this._calibSamples = [];
-      this._maybeIssueInstruction('lr_no_person', now);
       return this._result(g, now, {
-        status: LR_FEEDBACK.lr_no_person, statusKind: 'fail',
-        activityReason: 'lr_out_of_frame',
-        stanceResult: { ok: false, cueKeys: ['lr_no_person'], checks: {} },
+        status: DC_FEEDBACK.dc_no_person, statusKind: 'fail',
+        activityReason: 'dc_out_of_frame',
+        stanceResult: { ok: false, cueKeys: ['dc_no_person'], checks: {} },
       });
     }
 
     this._maxSw = Math.max(g.sw, this._maxSw * MAX_SW_DECAY);
-    const st = evaluateStance(g, this._maxSw);
+    const st = evaluateCurlStance(g, this._maxSw);
 
     if (!st.ok) {
       this._stancePassSince = -1;
       this._calibSamples = [];
-      const key = firstByPriority(st.cueKeys, LR_STANCE_PRIORITY);
-      this._maybeIssueInstruction(key, now);
+      const key = firstByPriority(st.cueKeys, DC_STANCE_PRIORITY);
       return this._result(g, now, {
-        status: LR_FEEDBACK[key] || 'Adjust your stance', statusKind: 'warn',
-        boneColor: LR_COLOR_AMBER,
-        feedback: LR_FEEDBACK[key] || '',
-        activityReason: 'lr_setup',
+        status: DC_FEEDBACK[key] || 'Adjust your stance', statusKind: 'warn',
+        boneColor: DC_COLOR_AMBER,
+        feedback: DC_FEEDBACK[key] || '',
+        activityReason: 'dc_setup',
         stanceResult: { ...st, primaryKey: key },
       });
     }
 
-    this._maybeIssueInstruction(null, now);
     if (this._stancePassSince < 0) this._stancePassSince = now;
+    const L = g.left;
+    const R = g.right;
     this._calibSamples.push({
       sw: g.sw,
       torso: g.torsoDist,
       tilt: (g.ls.y - g.rs.y) / g.sw,
-      eL: (g.left.elbow.y - g.left.lineY) / g.sw,
-      eR: (g.right.elbow.y - g.right.lineY) / g.sw,
-      wL: (g.left.wrist.y - g.left.lineY) / g.sw,
-      wR: (g.right.wrist.y - g.right.lineY) / g.sw,
+      sL: L.span, sR: R.span,
+      eL: L.elbowDy, eR: R.elbowDy,
+      oL: L.elbowOut, oR: R.elbowOut,
+      wyL: L.wrist.y, wyR: R.wrist.y,
+      eyL: L.elbow.y, eyR: R.elbow.y,
     });
     if (this._calibSamples.length > CALIB_MAX_SAMPLES) this._calibSamples.shift();
 
-    if (now - this._stancePassSince >= LR_CFG.stance_hold_sec) {
+    if (now - this._stancePassSince >= DC_CFG.stance_hold_sec) {
       this._calibrate();
-      this._phase = LR_PHASE.READY;
+      this._phase = DC_PHASE.READY;
       this._readyStart = now;
-      this._speakQueued(LR_VOICE_MSG.lr_stance_ok, { key: 'lr_stance_ok' });
-      this._setFeedback(LR_FEEDBACK.lr_stance_ok, now, 3);
+      this._speakQueued(DC_VOICE_MSG.dc_stance_ok, { key: 'dc_stance_ok' });
+      this._setFeedback(DC_FEEDBACK.dc_stance_ok, now, 3);
       return this._result(g, now, {
-        status: LR_FEEDBACK.lr_stance_ok, statusKind: 'ok',
-        feedback: LR_FEEDBACK.lr_stance_ok,
+        status: DC_FEEDBACK.dc_stance_ok, statusKind: 'ok',
+        feedback: DC_FEEDBACK.dc_stance_ok,
         stanceResult: st,
       });
     }
 
     return this._result(g, now, {
       status: 'Stance looks good — hold still…', statusKind: 'ok',
-      activityReason: 'lr_setup',
+      activityReason: 'dc_setup',
       stanceResult: st,
-      stanceHoldPct: clamp((now - this._stancePassSince) / LR_CFG.stance_hold_sec, 0, 1),
+      stanceHoldPct: clamp((now - this._stancePassSince) / DC_CFG.stance_hold_sec, 0, 1),
     });
   }
 
@@ -369,8 +353,13 @@ export class LateralRaiseFlow {
       sw: m('sw'),
       torso: m('torso'),
       tilt0: m('tilt'),
-      restElbow: { left: clamp(m('eL'), 0.5, 1.6), right: clamp(m('eR'), 0.5, 1.6) },
-      restWrist: { left: clamp(m('wL'), 1.0, 2.6), right: clamp(m('wR'), 1.0, 2.6) },
+      // REST_SPAN: resting wrist-to-shoulder vertical distance, × torso length.
+      restSpan: { left: clamp(m('sL'), 0.6, 1.6), right: clamp(m('sR'), 0.6, 1.6) },
+      restElbow: { left: clamp(m('eL'), 0.25, 1.0), right: clamp(m('eR'), 0.25, 1.0) },
+      restElbowOut: { left: clamp(m('oL'), -0.6, 0.8), right: clamp(m('oR'), -0.6, 0.8) },
+      // Pixel values at calibration time (reference / debug only).
+      restWristY: { left: m('wyL'), right: m('wyR') },
+      restElbowY: { left: m('eyL'), right: m('eyR') },
     };
     this._calibSamples = [];
   }
@@ -378,15 +367,18 @@ export class LateralRaiseFlow {
   // ── READY ────────────────────────────────────────────────────────────────
   _tickReady(g, now) {
     const elapsed = now - this._readyStart;
-    if (elapsed >= LR_CFG.ready_min_sec && (!this._voiceBusy() || elapsed >= LR_CFG.ready_max_sec)) {
+    if (elapsed >= DC_CFG.ready_min_sec && (!this._voiceBusy() || elapsed >= DC_CFG.ready_max_sec)) {
       this._rep.startSet(this._currentSet);
-      this._phase = LR_PHASE.ACTIVE;
+      this._phase = DC_PHASE.ACTIVE;
       this._lastMoveAt = -Infinity;
       this._notExSince = now;
-      this._activityReason = 'lr_arms_resting';
-      return this._result(g, now, { status: 'Raise both arms — rep 1', statusKind: 'ok' });
+      if (this._currentSet > 1) {
+        this._speakQueued(DC_VOICE_MSG.next_set(this._currentSet, this._targetSets), { key: `dc_next_set_${this._currentSet}` });
+      }
+      this._activityReason = 'dc_arms_resting';
+      return this._result(g, now, { status: 'Curl both dumbbells up — rep 1', statusKind: 'ok' });
     }
-    this._activityReason = 'lr_ready';
+    this._activityReason = 'dc_ready';
     return this._result(g, now, {
       status: 'Get ready…', statusKind: 'ok',
       feedback: this._currentFeedback(now) || 'Get ready…',
@@ -395,23 +387,24 @@ export class LateralRaiseFlow {
 
   // ── ACTIVE ───────────────────────────────────────────────────────────────
   _setActivity(exercising, reason, now) {
-    const next = exercising ? LR_ACTIVITY.EXERCISING : LR_ACTIVITY.NOT_EXERCISING;
+    const next = exercising ? DC_ACTIVITY.EXERCISING : DC_ACTIVITY.NOT_EXERCISING;
     if (next !== this._activity) {
       this._activity = next;
-      if (exercising) {
-        this._notExSince = -1;
-      } else {
-        this._notExSince = now;
-      }
+      this._notExSince = exercising ? -1 : now;
     }
     this._activityReason = reason;
   }
 
   _isLongIdle(now) {
-    return this._phase === LR_PHASE.ACTIVE
-      && this._activity === LR_ACTIVITY.NOT_EXERCISING
+    return this._phase === DC_PHASE.ACTIVE
+      && this._activity === DC_ACTIVITY.NOT_EXERCISING
       && this._notExSince >= 0
-      && now - this._notExSince >= LR_CFG.long_idle_seconds;
+      && now - this._notExSince >= DC_CFG.long_idle_seconds;
+  }
+
+  _idleStatus(rep) {
+    const next = rep.setCount + 1;
+    return rep.mode === 'alternate' ? `Curl one arm — rep ${next}` : `Curl both dumbbells up — rep ${next}`;
   }
 
   _tickActive(g, now, dt, lostLong) {
@@ -419,58 +412,55 @@ export class LateralRaiseFlow {
 
     if (!g) {
       if (lostLong) rep.abortInProgress();
-      this._setActivity(false, 'lr_out_of_frame', now);
+      this._setActivity(false, 'dc_out_of_frame', now);
       return this._result(g, now, {
-        status: LR_FEEDBACK.lr_out_of_frame, statusKind: 'warn',
-        activity: this._activity, activityReason: 'lr_out_of_frame',
-        boneColor: LR_COLOR_GREY,
+        status: DC_FEEDBACK.dc_out_of_frame, statusKind: 'warn',
+        activity: this._activity, activityReason: 'dc_out_of_frame',
+        boneColor: DC_COLOR_GREY,
       });
     }
 
-    if (facingRatio(g, this._calib) < LR_CFG.turn_ratio) {
+    if (facingRatio(g, this._calib) < DC_CFG.turn_ratio) {
       rep.abortInProgress();
-      this._setActivity(false, 'lr_turned_away', now);
+      this._setActivity(false, 'dc_turned_away', now);
       return this._result(g, now, {
-        status: 'Face the camera to continue', statusKind: 'warn',
-        activity: this._activity, activityReason: 'lr_turned_away',
-        boneColor: LR_COLOR_GREY,
+        status: DC_FEEDBACK.dc_turned_away, statusKind: 'warn',
+        activity: this._activity, activityReason: 'dc_turned_away',
+        boneColor: DC_COLOR_GREY,
       });
     }
 
     const res = rep.update(g, this._calib, now);
     if (rep.inProgress) this._lastMoveAt = now;
-    const exercising = rep.inProgress || now - this._lastMoveAt <= LR_CFG.idle_seconds;
-    this._setActivity(exercising, exercising ? 'lr_rep_in_progress' : 'lr_arms_resting', now);
+    const exercising = rep.inProgress || now - this._lastMoveAt <= DC_CFG.idle_seconds;
+    this._setActivity(exercising, exercising ? 'dc_rep_in_progress' : 'dc_arms_resting', now);
     if (exercising) this._activeSec += dt;
 
-    const sustained = rep.inProgress ? this._sustained(res.liveKeys, now) : this._sustained([], now);
-    const primaryLive = sustained.includes('lr_wrist_above')
-      ? 'lr_wrist_above'
-      : sustained[0] || null;
+    const sustained = this._sustained(rep.inProgress ? res.liveKeys : [], now);
+    const primaryLive = sustained.length ? firstByPriority(sustained, DC_LIVE_PRIORITY) : null;
     if (primaryLive) {
-      this._setFeedback(LR_FEEDBACK[primaryLive], now, 1.0);
+      this._setFeedback(DC_FEEDBACK[primaryLive], now, 1.0);
       this._setMistake(primaryLive, now, LIVE_MISTAKE_HOLD_SEC);
     } else if (res.topSides.length && !this._currentFeedback(now)) {
-      this._setFeedback('Top reached — lower with control', now, 1.0);
+      this._setFeedback('Top reached — lower slowly all the way down', now, 1.0);
     }
 
-    let repCompleted = null;
-    const attempt = res.attempt;
-    if (attempt) {
-      if (attempt.counted) repCompleted = attempt;
+    const repsCompleted = [];
+    for (const attempt of res.attempts) {
+      if (attempt.counted) repsCompleted.push(attempt);
       const setDone = this._onAttempt(attempt, now);
-      if (setDone) return this._onSetComplete(g, now, attempt, repCompleted);
+      if (setDone) return this._onSetComplete(g, now, res.attempts, repsCompleted);
     }
 
-    let boneColor = LR_COLOR_GREEN;
-    if (sustained.length) boneColor = LR_COLOR_RED;
-    else if (!exercising) boneColor = LR_COLOR_GREY;
+    let boneColor = DC_COLOR_GREEN;
+    if (sustained.length) boneColor = DC_COLOR_RED;
+    else if (!exercising) boneColor = DC_COLOR_GREY;
 
     let status;
-    if (this._isLongIdle(now)) status = LR_FEEDBACK.lr_long_idle;
-    else if (!rep.inProgress) status = `Raise both arms — rep ${rep.setCount + 1}`;
-    else if (res.topSides.length || rep.armState('left') === 'UP') status = 'Elbows to the shoulder line…';
-    else status = 'Raise both arms…';
+    if (this._isLongIdle(now)) status = DC_FEEDBACK.dc_long_idle;
+    else if (!rep.inProgress) status = this._idleStatus(rep);
+    else if (res.topSides.length) status = 'Squeeze at the top…';
+    else status = 'Curl up to the target line…';
 
     return this._result(g, now, {
       status,
@@ -479,17 +469,9 @@ export class LateralRaiseFlow {
       activity: this._activity,
       activityReason: this._activityReason,
       sustainedCues: sustained,
-      repCompleted,
-      attemptCompleted: attempt,
-      liftProgress: this._liftProgress(g),
+      repsCompleted,
+      attemptsCompleted: res.attempts,
     });
-  }
-
-  _liftProgress(g) {
-    const lifts = ['left', 'right']
-      .map((s) => armLift(g[s], this._calib)?.elbow)
-      .filter((v) => v != null);
-    return lifts.length ? clamp(Math.min(...lifts), 0, 1) : 0;
   }
 
   /** @returns {boolean} true when this attempt finished the current set. */
@@ -498,56 +480,63 @@ export class LateralRaiseFlow {
     const issue = a.primaryIssue;
     const setDone = this._targetReps > 0 && rep.setCount >= this._targetReps;
 
-    // The count is the only thing lateral raise ever says during the workout.
-    this._speak(`Rep ${a.repInSet}`, {
-      key: `lr_rep_${this._currentSet}_${a.repInSet}`, cooldownMs: 0, immediate: true,
-    });
+    if (a.counted) {
+      const setPart = this._targetSets > 0 ? `Set ${this._currentSet} of ${this._targetSets}, ` : '';
+      const repPart = this._targetReps > 0 ? `Rep ${a.repInSet} of ${this._targetReps}` : `Rep ${a.repInSet}`;
+      this._setBanner(`${setPart}${repPart}${a.clean ? ' ✓' : ''}`, now, 2.0);
+      this._setFeedback(issue ? this._issueText(issue) : 'Good rep!', now);
+      this._speakQueued(DC_VOICE_MSG.rep(a.repInSet), { key: `dc_rep_${this._currentSet}_${a.repInSet}_${a.attempt}` });
+    } else {
+      this._setBanner('Rep not counted', now, 2.0);
+      this._setFeedback(this._issueText(issue || 'dc_incomplete'), now);
+    }
 
-    const setPart = this._targetSets > 0 ? `Set ${this._currentSet} of ${this._targetSets}, ` : '';
-    const repPart = this._targetReps > 0 ? `Rep ${a.repInSet} of ${this._targetReps}` : `Rep ${a.repInSet}`;
-    this._setBanner(`${setPart}${repPart}${a.clean ? ' ✓' : ''}`, now, 2.0);
-    this._setFeedback(issue ? LR_FEEDBACK[issue] : 'Good rep!', now);
     if (issue) this._setMistake(issue, now, REP_MISTAKE_HOLD_SEC);
+    else if (!a.counted) this._setMistake('dc_incomplete', now, REP_MISTAKE_HOLD_SEC);
     return setDone;
   }
 
-  _onSetComplete(g, now, attempt, repCompleted) {
+  _onSetComplete(g, now, attempts, repsCompleted) {
     this._setsCompleted += 1;
     const finished = this._targetSets > 0 && this._setsCompleted >= this._targetSets;
-    this._setActivity(false, finished ? 'lr_complete' : 'lr_resting_between_sets', now);
+    this._setActivity(false, finished ? 'dc_complete' : 'dc_resting_between_sets', now);
+    this._rep.abortInProgress();
 
     if (finished) {
-      this._phase = LR_PHASE.COMPLETE;
+      this._phase = DC_PHASE.COMPLETE;
       this._final = this.summary();
+      this._speakQueued(DC_VOICE_MSG.all_done, { key: 'dc_all_done' });
       this._setBanner('All sets complete!', now, 60);
       return this._result(g, now, {
         status: 'All sets complete!', statusKind: 'ok',
-        repCompleted, attemptCompleted: attempt,
-        activityReason: 'lr_complete',
+        repsCompleted, attemptsCompleted: attempts,
+        activityReason: 'dc_complete',
       });
     }
 
-    this._phase = LR_PHASE.REST_BETWEEN_SETS;
+    this._phase = DC_PHASE.REST_BETWEEN_SETS;
     this._restStart = now;
     this._restResumeSince = -1;
+    this._restOverSpoken = false;
     const n = this._setsCompleted;
     this._setBanner(`Set ${n} complete`, now, 4);
+    this._speakQueued(DC_VOICE_MSG.set_done(n), { key: `dc_set_done_${n}` });
     return this._result(g, now, {
       status: `Set ${n} complete — rest`, statusKind: 'ok',
-      repCompleted, attemptCompleted: attempt,
-      activityReason: 'lr_resting_between_sets',
+      repsCompleted, attemptsCompleted: attempts,
+      activityReason: 'dc_resting_between_sets',
       restRemainingSec: this._restDuration(),
     });
   }
 
   // ── REST_BETWEEN_SETS ────────────────────────────────────────────────────
   _restDuration() {
-    return this._restSec ?? LR_CFG.rest_default_sec;
+    return this._restSec ?? DC_CFG.rest_default_sec;
   }
 
   _startNextSet(now) {
     this._currentSet += 1;
-    this._phase = LR_PHASE.READY;
+    this._phase = DC_PHASE.READY;
     this._readyStart = now;
     this._restResumeSince = -1;
     this._setBanner(`Set ${this._currentSet}${this._targetSets ? ` of ${this._targetSets}` : ''}`, now, 2);
@@ -555,18 +544,20 @@ export class LateralRaiseFlow {
 
   _tickRest(g, now) {
     const remaining = Math.max(0, this._restDuration() - (now - this._restStart));
-    let inStance = false;
-    if (g && this._calib) {
-      const st = evaluateStance(g, g.norm);
-      inStance = st.ok;
+    if (remaining <= 0 && !this._restOverSpoken) {
+      this._restOverSpoken = true;
+      this._speakQueued(DC_VOICE_MSG.rest_over(this._currentSet + 1), { key: `dc_rest_over_${this._currentSet}` });
     }
+
+    let inStance = false;
+    if (g && this._calib) inStance = evaluateCurlStance(g, g.norm).ok;
     if (inStance) {
       if (this._restResumeSince < 0) this._restResumeSince = now;
     } else {
       this._restResumeSince = -1;
     }
 
-    if (remaining <= 0 && inStance && now - this._restResumeSince >= LR_CFG.rest_resume_hold_sec) {
+    if (remaining <= 0 && inStance && now - this._restResumeSince >= DC_CFG.rest_resume_hold_sec) {
       this._startNextSet(now);
       return this._result(g, now, { status: 'Starting next set…', statusKind: 'ok' });
     }
@@ -576,40 +567,43 @@ export class LateralRaiseFlow {
       : 'Stand in your stance, arms down, to start the next set';
     return this._result(g, now, {
       status, statusKind: 'info',
-      activityReason: 'lr_resting_between_sets',
-      boneColor: LR_COLOR_GREY,
+      activityReason: 'dc_resting_between_sets',
+      boneColor: DC_COLOR_GREY,
       restRemainingSec: Math.ceil(remaining),
     });
   }
 
   // ── Debug ────────────────────────────────────────────────────────────────
   _debugLog(fr, g, now) {
-    const n = Math.max(1, Math.round(LR_CFG.debug_log_every_n));
+    const n = Math.max(1, Math.round(DC_CFG.debug_log_every_n));
     if (this._frameNo % n !== 0) return;
     if (!this._debugHeaderSent) {
       this._debugHeaderSent = true;
       // eslint-disable-next-line no-console
-      console.log('[LR] t,phase,activity,shoulderY,L_elbowY,L_wristY,R_elbowY,R_wristY,L_elbowDy,L_wristDy,R_elbowDy,R_wristDy,L_state,R_state,sw,norm,reps,setReps');
+      console.log('[DC] t,phase,activity,mode,L_shoulderY,L_elbowY,L_wristY,L_progressPct,L_state,R_shoulderY,R_elbowY,R_wristY,R_progressPct,R_state,torsoPx,swPx,reps,setReps,liveCues');
     }
-    const L = g?.left;
-    const R = g?.right;
+    const arm = (a, side) => {
+      const p = g ? curlProgress(a, this._calib) : null;
+      return [
+        fmt(a?.lineY, 1), fmt(a?.ok ? a.elbow.y : null, 1), fmt(a?.ok ? a.wrist.y : null, 1),
+        fmt(p == null ? null : p * 100, 1), fr.armStates[side],
+      ];
+    };
     // eslint-disable-next-line no-console
     console.log([
-      '[LR]', fmt(now, 2), fr.phase, fr.activity,
-      fmt(g?.shY, 1),
-      fmt(L?.elbow?.y, 1), fmt(L?.wrist?.y, 1),
-      fmt(R?.elbow?.y, 1), fmt(R?.wrist?.y, 1),
-      fmt(L?.elbowDy), fmt(L?.wristDy), fmt(R?.elbowDy), fmt(R?.wristDy),
-      fr.armStates.left, fr.armStates.right,
-      fmt(g?.sw, 1), fmt(g?.norm, 1),
+      '[DC]', fmt(now, 2), fr.phase, fr.activity, fr.mode,
+      ...arm(g?.left, 'left'),
+      ...arm(g?.right, 'right'),
+      fmt(g?.T, 1), fmt(g?.norm, 1),
       fr.repCount, fr.setRepCount,
+      (this._rep.live.liveKeys || []).join('|'),
     ].join(','));
   }
 
   reset() {
     this._voice.cancel();
     this._voice.resetCooldowns();
-    this._rep = new LateralRaiseRepTracker();
+    this._rep = new DumbbellCurlRepTracker();
     this._resetState();
   }
 }

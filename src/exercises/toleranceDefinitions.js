@@ -5,6 +5,8 @@ import { CFG, CFG_DEFAULTS, resetSquatCfg } from './squat/config.js';
 import { PUSHUP_CFG } from './pushup/config.js';
 import { SP_CFG, SP_CFG_DEFAULTS, resetShoulderPressCfg } from './shoulderPress/config.js';
 import { LR_CFG, LR_CFG_DEFAULTS, resetLateralRaiseCfg } from './lateralRaise/config.js';
+import { FR_CFG, FR_CFG_DEFAULTS, resetFrontRaiseCfg } from './frontRaise/config.js';
+import { DC_CFG, DC_CFG_DEFAULTS, resetDumbbellCurlCfg } from './dumbbellCurl/config.js';
 
 export const PUSHUP_CFG_DEFAULTS = {
   wrist_align_ratio_max: 0.06,
@@ -160,8 +162,108 @@ export const LATERAL_RAISE_TOLERANCE_GROUPS = [
   },
 ];
 
+export const FRONT_RAISE_TOLERANCE_GROUPS = [
+  {
+    title: 'Stance (setup)',
+    color: '#56cf7b',
+    sliders: [
+      { key: 'stance_min', label: 'Feet min (× shoulder width)', min: 0.5, max: 1.2, step: 0.01 },
+      { key: 'stance_max', label: 'Feet max (× shoulder width)', min: 1.0, max: 2.0, step: 0.01 },
+      { key: 'upright_lean_max', label: 'Upright lean tolerance', min: 0.08, max: 0.5, step: 0.01 },
+      { key: 'facing_min_ratio', label: 'Facing camera (min ratio)', min: 0.6, max: 0.98, step: 0.01 },
+    ],
+  },
+  {
+    title: 'Shoulder Line (reps)',
+    color: '#4ecdc4',
+    sliders: [
+      { key: 'top_tolerance', label: 'Top: wrist below line (max)', min: 0.02, max: 0.35, step: 0.005 },
+      { key: 'lift_start', label: 'Rep start (lift fraction)', min: 0.2, max: 0.7, step: 0.01 },
+      { key: 'lift_return', label: 'Rep end (lift fraction)', min: 0.05, max: 0.5, step: 0.01 },
+      { key: 'pair_window_sec', label: 'Both-arm window (s)', min: 0.2, max: 2.0, step: 0.05 },
+    ],
+  },
+  {
+    title: 'Form Rules',
+    color: '#f59e0b',
+    sliders: [
+      { key: 'too_high_tolerance', label: 'Wrist above line (max)', min: 0, max: 0.5, step: 0.005 },
+      { key: 'flare_tolerance', label: 'Arms drifting out (× shoulder width)', min: 0.1, max: 0.8, step: 0.005 },
+      { key: 'lean_tolerance', label: 'Lean back (torso length change)', min: 0.02, max: 0.2, step: 0.005 },
+      { key: 'shoulder_tilt_max', label: 'Shoulder tilt (max)', min: 0.03, max: 0.3, step: 0.005 },
+      { key: 'body_sway_max', label: 'Body sway (max)', min: 0.03, max: 0.4, step: 0.005 },
+      { key: 'symmetry_max', label: 'Left/right height diff (max)', min: 0.03, max: 0.4, step: 0.005 },
+      { key: 'clean_score_min', label: 'Clean rep min score', min: 50, max: 95, step: 1 },
+    ],
+  },
+  {
+    title: 'Activity',
+    color: '#5b8dee',
+    sliders: [
+      { key: 'idle_seconds', label: 'Idle after (s)', min: 0.5, max: 6, step: 0.1 },
+      { key: 'turn_ratio', label: 'Turned-away ratio', min: 0.3, max: 0.9, step: 0.01 },
+      { key: 'long_idle_seconds', label: 'Pause timer after (s)', min: 5, max: 120, step: 1 },
+    ],
+  },
+];
+
+export const DUMBBELL_CURL_TOLERANCE_GROUPS = [
+  {
+    title: 'Curl Lines (reps)',
+    color: '#4ecdc4',
+    sliders: [
+      { key: 'top_line_offset', label: 'Target line below shoulder (× torso)', min: 0, max: 0.35, step: 0.005 },
+      { key: 'top_tolerance', label: 'Top reached within (× torso)', min: 0.01, max: 0.25, step: 0.005 },
+      { key: 'upper_allowance', label: 'Upper limit above shoulder (× shoulder width)', min: 0, max: 0.4, step: 0.005 },
+      { key: 'bottom_tolerance', label: 'Fully lowered within (× torso)', min: 0.03, max: 0.3, step: 0.005 },
+      { key: 'curl_start', label: 'Rep start (curl progress)', min: 0.15, max: 0.6, step: 0.01 },
+      { key: 'pair_window_sec', label: 'Both-arm window (s)', min: 0.2, max: 2.0, step: 0.05 },
+    ],
+  },
+  {
+    title: 'Form Rules',
+    color: '#f59e0b',
+    sliders: [
+      { key: 'elbow_lift_tolerance', label: 'Elbow lift (× torso)', min: 0.03, max: 0.3, step: 0.005 },
+      { key: 'elbow_flare_tolerance', label: 'Elbow flare out (× shoulder width)', min: 0.05, max: 0.4, step: 0.005 },
+      { key: 'sway_tolerance', label: 'Body sway (× shoulder width)', min: 0.03, max: 0.4, step: 0.005 },
+      { key: 'lean_tolerance', label: 'Lean (torso length change)', min: 0.02, max: 0.2, step: 0.005 },
+      { key: 'shrug_tolerance', label: 'Shrug (× torso)', min: 0.02, max: 0.2, step: 0.005 },
+      { key: 'shoulder_tilt_max', label: 'Shoulder tilt (× shoulder width)', min: 0.03, max: 0.3, step: 0.005 },
+      { key: 'clean_score_min', label: 'Clean rep min score', min: 50, max: 95, step: 1 },
+    ],
+  },
+  {
+    title: 'Stance (setup)',
+    color: '#56cf7b',
+    sliders: [
+      { key: 'stance_min', label: 'Feet min (× shoulder width)', min: 0.5, max: 1.2, step: 0.01 },
+      { key: 'stance_max', label: 'Feet max (× shoulder width)', min: 1.0, max: 2.0, step: 0.01 },
+      { key: 'upright_lean_max', label: 'Upright lean tolerance', min: 0.08, max: 0.5, step: 0.01 },
+      { key: 'facing_min_ratio', label: 'Facing camera (min ratio)', min: 0.6, max: 0.98, step: 0.01 },
+    ],
+  },
+  {
+    title: 'Activity',
+    color: '#5b8dee',
+    sliders: [
+      { key: 'idle_seconds', label: 'Idle after (s)', min: 0.5, max: 6, step: 0.1 },
+      { key: 'turn_ratio', label: 'Turned-away ratio', min: 0.3, max: 0.9, step: 0.01 },
+      { key: 'long_idle_seconds', label: 'Pause timer after (s)', min: 5, max: 120, step: 1 },
+    ],
+  },
+];
+
+export function getDumbbellCurlToleranceConfig() {
+  return { CFG: DC_CFG, defaults: DC_CFG_DEFAULTS, reset: resetDumbbellCurlCfg };
+}
+
 export function getLateralRaiseToleranceConfig() {
   return { CFG: LR_CFG, defaults: LR_CFG_DEFAULTS, reset: resetLateralRaiseCfg };
+}
+
+export function getFrontRaiseToleranceConfig() {
+  return { CFG: FR_CFG, defaults: FR_CFG_DEFAULTS, reset: resetFrontRaiseCfg };
 }
 
 export function getShoulderPressToleranceConfig() {

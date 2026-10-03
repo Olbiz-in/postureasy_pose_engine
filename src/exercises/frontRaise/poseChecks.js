@@ -1,4 +1,4 @@
-// Front-view checks for the dumbbell lateral raise.
+// Front-view checks for the dumbbell front raise.
 //
 // Angle-free by design: every rule compares landmark y against a horizontal
 // shoulder line, or uses a distance ratio. Signed offsets from the line are
@@ -6,7 +6,7 @@
 // `norm` — the calibrated shoulder width once available, else the live one.
 
 import { LM } from '../../core/landmarks';
-import { LR_CFG } from './config';
+import { FR_CFG } from './config';
 import { mid, dist } from '../common/math';
 import { evaluateFrontStance } from '../common/frontStance';
 
@@ -36,19 +36,20 @@ export function buildGeometry(pts, calib = null) {
   const shY = shMid.y;
   const torsoDist = Math.max(dist(shMid, hipMid), 1);
   // Calibrated shoulder width, rescaled by torso length so stepping closer /
-  // farther after calibration keeps the ratios valid. Torso length barely
-  // changes while raising the arms or turning, unlike the live shoulder span.
+  // farther after calibration keeps the ratios valid.
   const scale = calib?.torso ? Math.max(0.5, Math.min(2, torsoDist / calib.torso)) : 1;
   const norm = calib?.sw ? calib.sw * scale : sw;
 
   const lineY = (side) => {
-    if (LR_CFG.line_mode === 'per_side') return side === 'left' ? ls.y : rs.y;
+    if (FR_CFG.line_mode === 'per_side') return side === 'left' ? ls.y : rs.y;
     return shY;
   };
 
   const arm = (side, shoulder, elbow, wrist) => {
     const ok = !!(elbow && wrist);
     const ly = lineY(side);
+    // + = wrist farther from the body midline than its shoulder (drifting out).
+    const outSign = shoulder.x >= shMid.x ? 1 : -1;
     return {
       side,
       ok,
@@ -58,6 +59,7 @@ export function buildGeometry(pts, calib = null) {
       lineY: ly,
       elbowDy: ok ? (elbow.y - ly) / norm : null,
       wristDy: ok ? (wrist.y - ly) / norm : null,
+      wristOut: ok ? ((wrist.x - shoulder.x) * outSign) / norm : null,
     };
   };
 
@@ -85,7 +87,7 @@ export function buildGeometry(pts, calib = null) {
  * checklist. `maxSw` is the widest shoulder span seen so far during setup.
  */
 export function evaluateStance(g, maxSw) {
-  return evaluateFrontStance(g, maxSw, LR_CFG, 'lr_');
+  return evaluateFrontStance(g, maxSw, FR_CFG, 'fr_');
 }
 
 // ── Activity helpers ────────────────────────────────────────────────────────
@@ -97,13 +99,13 @@ export function facingRatio(g, calib) {
 }
 
 /**
- * Lift fraction of one arm: 0 at the calibrated resting elbow height,
- * 1 with the elbow on the shoulder line, >1 above it. Also for the wrist.
+ * Lift fraction of one arm: 0 at the calibrated resting wrist height,
+ * 1 with the wrist on the shoulder line, >1 above it. Also for the elbow.
  */
 export function armLift(a, calib) {
   if (!a.ok) return null;
-  const restE = calib?.restElbow?.[a.side] ?? LR_CFG.rest_elbow_default;
-  const restW = calib?.restWrist?.[a.side] ?? LR_CFG.rest_wrist_default;
+  const restE = calib?.restElbow?.[a.side] ?? FR_CFG.rest_elbow_default;
+  const restW = calib?.restWrist?.[a.side] ?? FR_CFG.rest_wrist_default;
   return {
     elbow: (restE - a.elbowDy) / Math.max(restE, 0.2),
     wrist: (restW - a.wristDy) / Math.max(restW, 0.2),
@@ -113,14 +115,13 @@ export function armLift(a, calib) {
 /** Horizontal reference lines (pixel y) for the overlay. */
 export function raiseLines(g, calib) {
   const n = g.norm;
-  const restE = calib
-    ? (calib.restElbow.left + calib.restElbow.right) / 2
-    : LR_CFG.rest_elbow_default;
+  const restW = calib
+    ? (calib.restWrist.left + calib.restWrist.right) / 2
+    : FR_CFG.rest_wrist_default;
   return {
     shoulderY: g.shY,
-    bandTopY: g.shY - LR_CFG.elbow_above_tolerance * n,
-    bandBottomY: g.shY + LR_CFG.top_tolerance * n,
-    wristLimitY: g.shY - LR_CFG.wrist_above_tolerance * n,
-    returnY: g.shY + restE * (1 - LR_CFG.lift_return) * n,
+    bandTopY: g.shY - FR_CFG.too_high_tolerance * n,
+    bandBottomY: g.shY + FR_CFG.top_tolerance * n,
+    returnY: g.shY + restW * (1 - FR_CFG.lift_return) * n,
   };
 }

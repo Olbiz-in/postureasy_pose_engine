@@ -8,6 +8,8 @@ import pushup from './pushup/index.js';
 import pushupSide from './pushupSide/index.js';
 import shoulderPress from './shoulderPress/index.js';
 import lateralRaise from './lateralRaise/index.js';
+import frontRaise from './frontRaise/index.js';
+import dumbbellCurl from './dumbbellCurl/index.js';
 
 registerExercise(squat);
 registerExercise(squatSide);
@@ -15,5 +17,7 @@ registerExercise(pushup);
 registerExercise(pushupSide);
 registerExercise(shoulderPress);
 registerExercise(lateralRaise);
+registerExercise(frontRaise);
+registerExercise(dumbbellCurl);
 
-export { squat, squatSide, pushup, pushupSide, shoulderPress, lateralRaise };
+export { squat, squatSide, pushup, pushupSide, shoulderPress, lateralRaise, frontRaise, dumbbellCurl };

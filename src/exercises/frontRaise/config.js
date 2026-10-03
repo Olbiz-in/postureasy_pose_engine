@@ -1,9 +1,14 @@
-// Dumbbell lateral raise (front view) — thresholds, score weights, coaching
+// Dumbbell front raise (front view) — thresholds, score weights, coaching
 // text and voice lines.
 //
-// NO joint angles are used anywhere for this exercise. Every rule compares the
+// Same approach as the lateral raise: NO joint angles. Every rule compares the
 // vertical (y) position of a landmark against a horizontal shoulder line, or
 // uses a simple distance ratio. Image y grows downward, so "above" = smaller y.
+//
+// Seen from the front, the arms travel toward the camera, so the hands rise
+// straight up the image to the shoulder line. The WRIST drives the rep (hands
+// to shoulder height); the horizontal wrist offset from the shoulder catches
+// arms drifting out to the sides (turning it into a lateral raise).
 //
 // All distances are divided by the shoulder width captured during the stance
 // calibration (live shoulder width before calibration), so the thresholds do
@@ -12,15 +17,7 @@
 
 import { LM } from '../../core/landmarks';
 
-export const LR_REQUIRED_CORE = [
-  LM.LEFT_SHOULDER, LM.RIGHT_SHOULDER,
-  LM.LEFT_HIP, LM.RIGHT_HIP,
-];
-export const LR_ARM_LANDMARKS = {
-  left: { shoulder: LM.LEFT_SHOULDER, elbow: LM.LEFT_ELBOW, wrist: LM.LEFT_WRIST },
-  right: { shoulder: LM.RIGHT_SHOULDER, elbow: LM.RIGHT_ELBOW, wrist: LM.RIGHT_WRIST },
-};
-export const LR_TRACKED_LANDMARKS = [
+export const FR_TRACKED_LANDMARKS = [
   LM.NOSE,
   LM.LEFT_SHOULDER, LM.RIGHT_SHOULDER,
   LM.LEFT_ELBOW, LM.RIGHT_ELBOW,
@@ -29,7 +26,7 @@ export const LR_TRACKED_LANDMARKS = [
   LM.LEFT_ANKLE, LM.RIGHT_ANKLE,
 ];
 
-export const LR_CFG_DEFAULTS = {
+export const FR_CFG_DEFAULTS = {
   // ── Landmark quality / smoothing ─────────────────────────────────────────
   min_visibility: 0.5,
   smoothing: 'one_euro', // 'one_euro' | 'moving_average' | 'none'
@@ -57,10 +54,10 @@ export const LR_CFG_DEFAULTS = {
 
   // ── Shoulder line / rep detection ────────────────────────────────────────
   line_mode: 'average', // 'average' (one line, both shoulders) | 'per_side'
-  // TOP ("touched the line"): elbow at most this far BELOW the shoulder line.
-  top_tolerance: 0.10,
-  // Lift fraction: 0 = calibrated resting elbow height, 1 = elbow on the line.
-  // Elbow height follows 1 − cos(arm raise), so 0.25 ≈ 40°, 0.35 ≈ 50°.
+  // TOP ("hands at shoulder height"): wrist at most this far BELOW the line.
+  top_tolerance: 0.12,
+  // Lift fraction: 0 = calibrated resting wrist height, 1 = wrist on the line.
+  // Wrist height follows 1 − cos(arm raise), so 0.25 ≈ 40°, 0.35 ≈ 50°.
   lift_start: 0.25, // arm has left the start zone (rep begins) — every cycle past this counts as a rep
   lift_return: 0.15, // arm is back in the start zone (hysteresis vs lift_start; blocks double counting)
   pair_window_sec: 0.7, // both arms must finish their cycles this close together
@@ -70,16 +67,21 @@ export const LR_CFG_DEFAULTS = {
   rest_wrist_default: 1.7,
 
   // ── Form rules ───────────────────────────────────────────────────────────
-  wrist_above_tolerance: 0.05, // wrist above the line by more than this → flag
-  elbow_above_tolerance: 0.12, // elbow above the line by more than this → flag
+  too_high_tolerance: 0.15, // wrist above the line by more than this → flag
+  // Arms drifting out to the sides: wrist x outward of the shoulder x (/ sw),
+  // only checked once the wrist lift passes `flare_check_lift`.
+  flare_tolerance: 0.35,
+  flare_check_lift: 0.5,
+  lean_tolerance: 0.06, // fraction of torso length lost during a rep (leaning back)
   flag_min_sec: 0.12, // a fault must persist this long inside a rep to count
   shoulder_tilt_max: 0.10, // |Δ shoulder y| / sw vs calibrated baseline
   body_sway_max: 0.15, // shoulder-center x drift / sw during a rep
-  symmetry_max: 0.15, // |left − right peak elbow height| / sw
+  symmetry_max: 0.15, // |left − right peak wrist height| / sw
 
   // Where each component score reaches 0 (linear ramp from its tolerance).
-  wrist_above_zero_at: 0.30,
-  elbow_above_zero_at: 0.40,
+  too_high_zero_at: 0.45,
+  flare_zero_at: 0.8,
+  lean_zero_at: 0.20,
   shoulder_tilt_zero_at: 0.30,
   body_sway_zero_at: 0.45,
   symmetry_zero_at: 0.40,
@@ -102,93 +104,95 @@ export const LR_CFG_DEFAULTS = {
 };
 
 /** Live mutable config — tolerance sliders write here directly. */
-export const LR_CFG = { ...LR_CFG_DEFAULTS };
+export const FR_CFG = { ...FR_CFG_DEFAULTS };
 
-export function resetLateralRaiseCfg() {
-  Object.assign(LR_CFG, LR_CFG_DEFAULTS);
+export function resetFrontRaiseCfg() {
+  Object.assign(FR_CFG, FR_CFG_DEFAULTS);
 }
 
 /** Toggle the per-frame debug log + on-canvas readout. */
-export function setLateralRaiseDebug(on) {
-  LR_CFG.debug = !!on;
-  return LR_CFG.debug;
+export function setFrontRaiseDebug(on) {
+  FR_CFG.debug = !!on;
+  return FR_CFG.debug;
 }
 
 // Weights of the per-rep form score (normalized, so they need not sum to 100).
-export const LR_SCORE_WEIGHTS_DEFAULTS = {
+export const FR_SCORE_WEIGHTS_DEFAULTS = {
   rom: 30,
-  wrist: 25,
+  path: 25,
   symmetry: 20,
   stability: 25,
 };
-export const LR_SCORE_WEIGHTS = { ...LR_SCORE_WEIGHTS_DEFAULTS };
+export const FR_SCORE_WEIGHTS = { ...FR_SCORE_WEIGHTS_DEFAULTS };
 
-export function resetLateralRaiseWeights() {
-  Object.assign(LR_SCORE_WEIGHTS, LR_SCORE_WEIGHTS_DEFAULTS);
+export function resetFrontRaiseWeights() {
+  Object.assign(FR_SCORE_WEIGHTS, FR_SCORE_WEIGHTS_DEFAULTS);
 }
 
 // Rep-level issue priority — decides which single message is shown / voiced.
-export const LR_ISSUE_PRIORITY = [
-  'lr_incomplete',
-  'lr_wrist_above',
-  'lr_not_high_enough',
-  'lr_elbow_too_high',
-  'lr_asymmetry',
-  'lr_shoulder_tilt',
-  'lr_body_sway',
+export const FR_ISSUE_PRIORITY = [
+  'fr_incomplete',
+  'fr_too_high',
+  'fr_not_high_enough',
+  'fr_arms_flared',
+  'fr_leaning_back',
+  'fr_asymmetry',
+  'fr_shoulder_tilt',
+  'fr_body_sway',
 ];
 
 // Stance-check cue priority — one corrective message at a time.
-export const LR_STANCE_PRIORITY = [
-  'lr_no_person',
-  'lr_feet_not_visible',
-  'lr_facing',
-  'lr_not_upright',
-  'lr_feet_narrow',
-  'lr_feet_wide',
-  'lr_arms_not_down',
+export const FR_STANCE_PRIORITY = [
+  'fr_no_person',
+  'fr_feet_not_visible',
+  'fr_facing',
+  'fr_not_upright',
+  'fr_feet_narrow',
+  'fr_feet_wide',
+  'fr_arms_not_down',
 ];
 
-export const LR_FEEDBACK = {
-  lr_no_person: 'Stand in front of the camera',
-  lr_feet_not_visible: 'Step back — feet not visible',
-  lr_facing: 'Face the camera directly',
-  lr_not_upright: 'Stand up straight',
-  lr_feet_narrow: 'Move your feet apart to shoulder width',
-  lr_feet_wide: 'Feet too wide — bring them in to shoulder width',
-  lr_arms_not_down: 'Lower your arms to your sides',
-  lr_stance_ok: 'Your stance is correct. Start the exercise.',
+export const FR_FEEDBACK = {
+  fr_no_person: 'Stand in front of the camera',
+  fr_feet_not_visible: 'Step back — feet not visible',
+  fr_facing: 'Face the camera directly',
+  fr_not_upright: 'Stand up straight',
+  fr_feet_narrow: 'Move your feet apart to shoulder width',
+  fr_feet_wide: 'Feet too wide — bring them in to shoulder width',
+  fr_arms_not_down: 'Lower your arms in front of your thighs',
+  fr_stance_ok: 'Your stance is correct. Start the exercise.',
 
-  lr_incomplete: 'Incomplete rep — raise both arms together',
-  lr_wrist_above: 'Lower your hands, wrists should stay below shoulder level',
-  lr_not_high_enough: 'Raise your elbows up to the shoulder line',
-  lr_elbow_too_high: 'Elbows too high — stop at shoulder level',
-  lr_asymmetry: 'Raise both arms to the same height',
-  lr_shoulder_tilt: 'Keep your shoulders level — don\'t shrug',
-  lr_body_sway: 'Keep your body still — don\'t swing',
+  fr_incomplete: 'Incomplete rep — raise both arms together',
+  fr_too_high: 'Too high — stop with your hands at shoulder level',
+  fr_not_high_enough: 'Raise your hands up to shoulder height',
+  fr_arms_flared: 'Keep your arms in front — don\'t let them drift out',
+  fr_leaning_back: 'Don\'t lean back — keep your torso upright',
+  fr_asymmetry: 'Raise both arms to the same height',
+  fr_shoulder_tilt: 'Keep your shoulders level — don\'t shrug',
+  fr_body_sway: 'Keep your body still — don\'t swing',
 
-  lr_turned_away: 'Turned away',
-  lr_arms_resting: 'Arms resting',
-  lr_out_of_frame: 'Out of frame',
-  lr_long_idle: 'Paused — start your next rep or press Stop',
+  fr_turned_away: 'Turned away',
+  fr_arms_resting: 'Arms resting',
+  fr_out_of_frame: 'Out of frame',
+  fr_long_idle: 'Paused — start your next rep or press Stop',
 };
 
-export const LR_VOICE_MSG = {
-  setup_begin: 'Stand facing the camera with your feet shoulder width apart and your arms down at your sides.',
-  lr_no_person: 'Please stand in front of the camera.',
-  lr_feet_not_visible: 'Step back so your full body, including your feet, is visible.',
-  lr_facing: 'Please turn and face the camera.',
-  lr_not_upright: 'Stand up straight.',
-  lr_feet_narrow: 'Move your feet apart to shoulder width.',
-  lr_feet_wide: 'Your feet are too wide. Bring them in to shoulder width.',
-  lr_arms_not_down: 'Lower your arms down to your sides.',
-  lr_stance_ok: 'Your stance is correct. Start the exercise.',
+export const FR_VOICE_MSG = {
+  setup_begin: 'Stand facing the camera with your feet shoulder width apart and your arms down in front of your thighs.',
+  fr_no_person: 'Please stand in front of the camera.',
+  fr_feet_not_visible: 'Step back so your full body, including your feet, is visible.',
+  fr_facing: 'Please turn and face the camera.',
+  fr_not_upright: 'Stand up straight.',
+  fr_feet_narrow: 'Move your feet apart to shoulder width.',
+  fr_feet_wide: 'Your feet are too wide. Bring them in to shoulder width.',
+  fr_arms_not_down: 'Lower your arms down in front of your thighs.',
+  fr_stance_ok: 'Your stance is correct. Start the exercise.',
 
-  // During the workout lateral raise only says "Rep N" — mistakes, turning
+  // During the workout front raise only says "Rep N" — mistakes, turning
   // away, idle and set transitions are overlay-only.
 };
 
-export const LR_COLOR_GREEN = 'rgb(0,255,0)';
-export const LR_COLOR_AMBER = 'rgb(255,190,0)';
-export const LR_COLOR_RED = 'rgb(255,0,0)';
-export const LR_COLOR_GREY = 'rgb(170,170,170)';
+export const FR_COLOR_GREEN = 'rgb(0,255,0)';
+export const FR_COLOR_AMBER = 'rgb(255,190,0)';
+export const FR_COLOR_RED = 'rgb(255,0,0)';
+export const FR_COLOR_GREY = 'rgb(170,170,170)';

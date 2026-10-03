@@ -1,18 +1,18 @@
-// Rep counting + per-rep form scoring for the dumbbell lateral raise.
+// Rep counting + per-rep form scoring for the dumbbell front raise.
 //
 // Each arm runs its own line-based cycle (no angles):
 //   WAIT_DOWN → arm must first be in the start zone (after start / abort)
-//   DOWN      → resting; leaves when the elbow lift reaches `lift_start`
-//   UP        → rising / at the top; TOP is reached ("half rep") when the elbow
-//               comes within `top_tolerance` of the shoulder line; the cycle
-//               ends once elbow AND wrist drop back under `lift_return`
+//   DOWN      → resting; leaves when the wrist lift reaches `lift_start`
+//   UP        → rising / at the top; TOP is reached when the wrist comes
+//               within `top_tolerance` of the shoulder line; the cycle ends
+//               once wrist AND elbow drop back under `lift_return`
 //
 // The two arm cycles are paired into one attempt, and every attempt is a
 // counted rep — partial range of motion included. Full ROM (both arms reached
 // the top within `pair_window_sec`) only affects the issues list, the score
 // and whether the rep is "clean". Every attempt gets a weighted 0–100 score.
 
-import { LR_CFG, LR_SCORE_WEIGHTS, LR_ISSUE_PRIORITY } from './config';
+import { FR_CFG, FR_SCORE_WEIGHTS, FR_ISSUE_PRIORITY } from './config';
 import { armLift } from './poseChecks';
 import { clamp01, ramp, round2, avg, firstByPriority } from '../common/math';
 
@@ -30,10 +30,10 @@ function newCycle(side, now) {
     topAt: -1,
     reachedTop: false,
     peakLift: 0,
-    minElbowDy: Infinity,
     minWristDy: Infinity,
-    wristAboveSec: 0,
-    elbowAboveSec: 0,
+    maxWristOut: 0,
+    tooHighSec: 0,
+    flaredSec: 0,
     lost: false,
     partial: false,
     consumed: false,
@@ -41,10 +41,10 @@ function newCycle(side, now) {
 }
 
 export function selectPrimaryIssue(keys) {
-  return firstByPriority(keys, LR_ISSUE_PRIORITY);
+  return firstByPriority(keys, FR_ISSUE_PRIORITY);
 }
 
-export class LateralRaiseRepTracker {
+export class FrontRaiseRepTracker {
   constructor() {
     this.reset();
   }
@@ -88,16 +88,25 @@ export class LateralRaiseRepTracker {
 
   _openWindow(g, now) {
     if (this._window) return;
-    this._window = { startAt: now, x0: g.shMid.x, maxTilt: 0, maxSway: 0 };
+    this._window = {
+      startAt: now, x0: g.shMid.x, td0: g.torsoDist,
+      maxTilt: 0, maxSway: 0, maxLean: 0, leanSec: 0,
+    };
   }
 
-  _updateWindow(g, calib) {
+  /** @returns {boolean} true while the torso is leaning back past tolerance. */
+  _updateWindow(g, calib, dt) {
     const w = this._window;
-    if (!w) return;
+    if (!w) return false;
     const tilt = Math.abs(g.tilt - (calib?.tilt0 ?? 0));
     const sway = Math.abs(g.shMid.x - w.x0) / g.norm;
+    const lean = Math.max(0, (w.td0 - g.torsoDist) / w.td0);
     w.maxTilt = Math.max(w.maxTilt, tilt);
     w.maxSway = Math.max(w.maxSway, sway);
+    w.maxLean = Math.max(w.maxLean, lean);
+    const leaning = lean > FR_CFG.lean_tolerance;
+    if (leaning) w.leanSec += dt;
+    return leaning;
   }
 
   _stepArm(side, a, g, calib, now, dt) {
@@ -107,7 +116,7 @@ export class LateralRaiseRepTracker {
     if (!a.ok) {
       if (arm.state === 'UP' && arm.cycle) {
         if (arm.missingSince < 0) arm.missingSince = now;
-        if (now - arm.missingSince >= LR_CFG.arm_missing_abort_sec) {
+        if (now - arm.missingSince >= FR_CFG.arm_missing_abort_sec) {
           const c = arm.cycle;
           c.lost = true;
           c.endAt = now;
@@ -119,7 +128,7 @@ export class LateralRaiseRepTracker {
     }
     arm.missingSince = -1;
     const lift = armLift(a, calib);
-    const inStartZone = lift.elbow <= LR_CFG.lift_return && lift.wrist <= LR_CFG.lift_return;
+    const inStartZone = lift.wrist <= FR_CFG.lift_return && lift.elbow <= FR_CFG.lift_return;
 
     if (arm.state === 'WAIT_DOWN') {
       if (inStartZone) arm.state = 'DOWN';
@@ -127,32 +136,34 @@ export class LateralRaiseRepTracker {
     }
 
     if (arm.state === 'DOWN') {
-      if (lift.elbow < LR_CFG.lift_start) return res;
+      if (lift.wrist < FR_CFG.lift_start) return res;
       arm.state = 'UP';
       arm.cycle = newCycle(side, now);
       this._openWindow(g, now);
     }
 
     const c = arm.cycle;
-    if (!c.reachedTop && now - c.startAt > LR_CFG.max_cycle_sec) {
+    if (!c.reachedTop && now - c.startAt > FR_CFG.max_cycle_sec) {
       this._arms[side] = newArm();
       return res;
     }
-    c.peakLift = Math.max(c.peakLift, lift.elbow);
-    c.minElbowDy = Math.min(c.minElbowDy, a.elbowDy);
+    c.peakLift = Math.max(c.peakLift, lift.wrist);
     c.minWristDy = Math.min(c.minWristDy, a.wristDy);
-    if (!c.reachedTop && a.elbowDy <= LR_CFG.top_tolerance) {
+    if (!c.reachedTop && a.wristDy <= FR_CFG.top_tolerance) {
       c.reachedTop = true;
       c.topAt = now;
       res.top = true;
     }
-    if (-a.wristDy > LR_CFG.wrist_above_tolerance) {
-      c.wristAboveSec += dt;
-      res.liveKeys.push('lr_wrist_above');
+    if (-a.wristDy > FR_CFG.too_high_tolerance) {
+      c.tooHighSec += dt;
+      res.liveKeys.push('fr_too_high');
     }
-    if (-a.elbowDy > LR_CFG.elbow_above_tolerance) {
-      c.elbowAboveSec += dt;
-      res.liveKeys.push('lr_elbow_too_high');
+    if (lift.wrist >= FR_CFG.flare_check_lift) {
+      c.maxWristOut = Math.max(c.maxWristOut, a.wristOut);
+      if (a.wristOut > FR_CFG.flare_tolerance) {
+        c.flaredSec += dt;
+        res.liveKeys.push('fr_arms_flared');
+      }
     }
 
     if (inStartZone) {
@@ -186,13 +197,13 @@ export class LateralRaiseRepTracker {
       r.liveKeys.forEach((k) => liveKeys.add(k));
       if (r.done) this._onCycleDone(r.done, now);
     }
-    this._updateWindow(g, calib);
+    if (this._updateWindow(g, calib, dt)) liveKeys.add('fr_leaning_back');
 
     let attempt = null;
     const p = this._pending;
     if (p && p.left && p.right) {
       attempt = this._resolve(calib, now);
-    } else if (p && now - p.firstAt > LR_CFG.pair_window_sec) {
+    } else if (p && now - p.firstAt > FR_CFG.pair_window_sec) {
       const other = p.left ? 'right' : 'left';
       const otherArm = this._arms[other];
       if (otherArm.state === 'UP' && otherArm.cycle && !otherArm.cycle.consumed) {
@@ -213,25 +224,23 @@ export class LateralRaiseRepTracker {
 
   _armResult(c, calib) {
     if (!c) return null;
-    const restE = calib?.restElbow?.[c.side] ?? LR_CFG.rest_elbow_default;
-    const tol = LR_CFG.top_tolerance;
-    const reach = c.minElbowDy <= tol ? 1 : clamp01((restE - c.minElbowDy) / Math.max(restE - tol, 0.1));
-    const maxElbowAbove = Math.max(0, -c.minElbowDy);
+    const restW = calib?.restWrist?.[c.side] ?? FR_CFG.rest_wrist_default;
+    const tol = FR_CFG.top_tolerance;
+    const reach = c.minWristDy <= tol ? 1 : clamp01((restW - c.minWristDy) / Math.max(restW - tol, 0.1));
     const maxWristAbove = Math.max(0, -c.minWristDy);
-    const overshoot = ramp(maxElbowAbove, LR_CFG.elbow_above_tolerance, LR_CFG.elbow_above_zero_at);
+    const overshoot = ramp(maxWristAbove, FR_CFG.too_high_tolerance, FR_CFG.too_high_zero_at);
     return {
       side: c.side,
       reachedTop: c.reachedTop && !c.lost,
       complete: !c.partial && !c.lost,
       lost: c.lost,
-      peakElbowDy: round2(c.minElbowDy),
       peakWristDy: round2(c.minWristDy),
-      maxElbowAbove,
       maxWristAbove,
+      maxWristOut: c.maxWristOut,
       romPct: reach * 100,
       romScore: Math.max(0, reach * 100 - 50 * overshoot),
-      wristAbove: c.wristAboveSec >= LR_CFG.flag_min_sec,
-      elbowTooHigh: c.elbowAboveSec >= LR_CFG.flag_min_sec,
+      tooHigh: c.tooHighSec >= FR_CFG.flag_min_sec,
+      flared: c.flaredSec >= FR_CFG.flag_min_sec,
       topAt: c.topAt,
       endAt: c.endAt,
     };
@@ -251,43 +260,47 @@ export class LateralRaiseRepTracker {
     const issues = new Set();
     if (!fullRom) {
       const anyTop = arms.some((a) => a.reachedTop);
-      issues.add(anyTop || arms.length < 2 || arms.some((a) => a.lost) ? 'lr_incomplete' : 'lr_not_high_enough');
+      issues.add(anyTop || arms.length < 2 || arms.some((a) => a.lost) ? 'fr_incomplete' : 'fr_not_high_enough');
     }
-    if (arms.some((a) => !a.reachedTop)) issues.add('lr_not_high_enough');
-    if (arms.some((a) => a.wristAbove)) issues.add('lr_wrist_above');
-    if (arms.some((a) => a.elbowTooHigh)) issues.add('lr_elbow_too_high');
+    if (arms.some((a) => !a.reachedTop)) issues.add('fr_not_high_enough');
+    if (arms.some((a) => a.tooHigh)) issues.add('fr_too_high');
+    if (arms.some((a) => a.flared)) issues.add('fr_arms_flared');
 
-    const symDiff = L && R ? Math.abs(p.left.minElbowDy - p.right.minElbowDy) : null;
-    if (symDiff != null && symDiff > LR_CFG.symmetry_max) issues.add('lr_asymmetry');
+    const symDiff = L && R ? Math.abs(p.left.minWristDy - p.right.minWristDy) : null;
+    if (symDiff != null && symDiff > FR_CFG.symmetry_max) issues.add('fr_asymmetry');
     const tilt = win?.maxTilt ?? 0;
     const sway = win?.maxSway ?? 0;
-    if (tilt > LR_CFG.shoulder_tilt_max) issues.add('lr_shoulder_tilt');
-    if (sway > LR_CFG.body_sway_max) issues.add('lr_body_sway');
+    const lean = win?.maxLean ?? 0;
+    if (tilt > FR_CFG.shoulder_tilt_max) issues.add('fr_shoulder_tilt');
+    if (sway > FR_CFG.body_sway_max) issues.add('fr_body_sway');
+    if ((win?.leanSec ?? 0) >= FR_CFG.flag_min_sec) issues.add('fr_leaning_back');
 
     // ── Component scores (0–100) ────────────────────────────────────────────
     const romPct = ((L?.romPct ?? 0) + (R?.romPct ?? 0)) / 2;
     const romScore = ((L?.romScore ?? 0) + (R?.romScore ?? 0)) / 2;
-    const maxWristAbove = Math.max(0, ...arms.map((a) => a.maxWristAbove));
-    const wristScore = 100 * (1 - ramp(maxWristAbove, LR_CFG.wrist_above_tolerance, LR_CFG.wrist_above_zero_at));
-    const symmetryPct = symDiff == null ? 0 : 100 * (1 - ramp(symDiff, 0, LR_CFG.symmetry_zero_at));
-    const tiltScore = 1 - ramp(tilt, LR_CFG.shoulder_tilt_max, LR_CFG.shoulder_tilt_zero_at);
-    const swayScore = 1 - ramp(sway, LR_CFG.body_sway_max, LR_CFG.body_sway_zero_at);
-    const stabilityPct = 100 * (tiltScore + swayScore) / 2;
+    const maxWristOut = Math.max(0, ...arms.map((a) => a.maxWristOut));
+    const pathPct = 100 * (1 - ramp(maxWristOut, FR_CFG.flare_tolerance, FR_CFG.flare_zero_at));
+    const symmetryPct = symDiff == null ? 0 : 100 * (1 - ramp(symDiff, 0, FR_CFG.symmetry_zero_at));
+    const tiltScore = 1 - ramp(tilt, FR_CFG.shoulder_tilt_max, FR_CFG.shoulder_tilt_zero_at);
+    const swayScore = 1 - ramp(sway, FR_CFG.body_sway_max, FR_CFG.body_sway_zero_at);
+    const leanScore = 1 - ramp(lean, FR_CFG.lean_tolerance, FR_CFG.lean_zero_at);
+    const stabilityPct = 100 * (tiltScore + swayScore + leanScore) / 3;
 
-    const W = LR_SCORE_WEIGHTS;
-    const wSum = (W.rom || 0) + (W.wrist || 0) + (W.symmetry || 0) + (W.stability || 0) || 1;
+    const W = FR_SCORE_WEIGHTS;
+    const wSum = (W.rom || 0) + (W.path || 0) + (W.symmetry || 0) + (W.stability || 0) || 1;
     const score = Math.round(
       ((W.rom || 0) * romScore
-        + (W.wrist || 0) * wristScore
+        + (W.path || 0) * pathPct
         + (W.symmetry || 0) * symmetryPct
         + (W.stability || 0) * stabilityPct) / wSum,
     );
 
-    const keys = LR_ISSUE_PRIORITY.filter((k) => issues.has(k));
+    const keys = FR_ISSUE_PRIORITY.filter((k) => issues.has(k));
     const clean = fullRom
-      && score >= LR_CFG.clean_score_min
-      && !issues.has('lr_wrist_above')
-      && !issues.has('lr_incomplete');
+      && score >= FR_CFG.clean_score_min
+      && !issues.has('fr_too_high')
+      && !issues.has('fr_arms_flared')
+      && !issues.has('fr_incomplete');
 
     this.count += 1;
     this.setCount += 1;
@@ -303,21 +316,23 @@ export class LateralRaiseRepTracker {
       score,
       components: {
         rom: Math.round(romScore),
-        wrist: Math.round(wristScore),
+        path: Math.round(pathPct),
         symmetry: Math.round(symmetryPct),
         stability: Math.round(stabilityPct),
       },
       romPct: Math.round(romPct),
+      pathPct: Math.round(pathPct),
       symmetryPct: Math.round(symmetryPct),
       stabilityPct: Math.round(stabilityPct),
       issues: keys,
       primaryIssue: selectPrimaryIssue(keys),
-      shoulderTilt: Math.round(tilt * 100) / 100,
-      bodySway: Math.round(sway * 100) / 100,
-      symmetryDiff: symDiff == null ? null : Math.round(symDiff * 100) / 100,
+      shoulderTilt: round2(tilt),
+      bodySway: round2(sway),
+      lean: round2(lean),
+      symmetryDiff: symDiff == null ? null : round2(symDiff),
       left: L,
       right: R,
-      durationSec: Math.round(Math.max(0, now - startAt) * 100) / 100,
+      durationSec: round2(Math.max(0, now - startAt)),
       finishedAt: now,
     };
     this.attempts.push(result);
@@ -330,7 +345,7 @@ export class LateralRaiseRepTracker {
  * Cumulative session metrics over every attempt (all sets). Pure — safe to
  * call at any time, including after an early Stop.
  */
-export function summarizeLateralRaise(attempts, {
+export function summarizeFrontRaise(attempts, {
   activeSec = 0,
   sessionSec = 0,
   setsCompleted = 0,
@@ -368,19 +383,21 @@ export function summarizeLateralRaise(attempts, {
     romPct: rom,
     romBest: best ? { attempt: best.attempt, rep: best.index, romPct: best.romPct } : null,
     romWorst: worst ? { attempt: worst.attempt, rep: worst.index, romPct: worst.romPct } : null,
+    pathPct: r(avg(list.map((a) => a.pathPct))),
     symmetryPct: r(avg(list.map((a) => a.symmetryPct))),
     stabilityPct: r(avg(list.map((a) => a.stabilityPct))),
     activeSec: Math.round(activeSec),
     sessionSec: Math.round(sessionSec),
     avgRepSec: counted.length ? Math.round(avg(counted.map((a) => a.durationSec)) * 10) / 10 : null,
     mistakes: {
-      wristAboveShoulder: has('lr_wrist_above'),
-      elbowTooHigh: has('lr_elbow_too_high'),
-      notHighEnough: has('lr_not_high_enough'),
-      incomplete: has('lr_incomplete'),
-      asymmetry: has('lr_asymmetry'),
-      shoulderTilt: has('lr_shoulder_tilt'),
-      bodySway: has('lr_body_sway'),
+      tooHigh: has('fr_too_high'),
+      notHighEnough: has('fr_not_high_enough'),
+      armsFlared: has('fr_arms_flared'),
+      leaningBack: has('fr_leaning_back'),
+      incomplete: has('fr_incomplete'),
+      asymmetry: has('fr_asymmetry'),
+      shoulderTilt: has('fr_shoulder_tilt'),
+      bodySway: has('fr_body_sway'),
     },
     perRep: list.map((a) => ({
       attempt: a.attempt,
