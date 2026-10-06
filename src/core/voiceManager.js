@@ -50,7 +50,19 @@ export class VoiceManager {
     this._queue = [];
     this._isQueuedSpeaking = false;
     this._isDirectSpeaking = false;
+    // Bumped on every utterance / cancel so a cancelled utterance's late onEnd
+    // cannot release the lock held by the utterance that replaced it.
+    this._token = 0;
     this._adapter = createVoiceAdapter();
+  }
+
+  _ender(flag) {
+    const token = ++this._token;
+    return () => {
+      if (token !== this._token) return;
+      this[flag] = false;
+      this._playNextQueued();
+    };
   }
 
   _playNextQueued() {
@@ -60,12 +72,7 @@ export class VoiceManager {
     const next = this._queue.shift();
     if (!next) return;
     this._isQueuedSpeaking = true;
-    const started = this._adapter.speak(next, {
-      onEnd: () => {
-        this._isQueuedSpeaking = false;
-        this._playNextQueued();
-      },
-    });
+    const started = this._adapter.speak(next, { onEnd: this._ender('_isQueuedSpeaking') });
     if (!started) this._isQueuedSpeaking = false;
   }
 
@@ -81,14 +88,10 @@ export class VoiceManager {
       this._queue = [];
       this._isQueuedSpeaking = false;
       this._isDirectSpeaking = false;
+      this._token++;
       this._adapter.cancel();
       this._isDirectSpeaking = true;
-      const started = this._adapter.speak(text, {
-        onEnd: () => {
-          this._isDirectSpeaking = false;
-          this._playNextQueued();
-        },
-      });
+      const started = this._adapter.speak(text, { onEnd: this._ender('_isDirectSpeaking') });
       if (!started) this._isDirectSpeaking = false;
       return started;
     }
@@ -101,12 +104,7 @@ export class VoiceManager {
     }
 
     this._isDirectSpeaking = true;
-    const started = this._adapter.speak(text, {
-      onEnd: () => {
-        this._isDirectSpeaking = false;
-        this._playNextQueued();
-      },
-    });
+    const started = this._adapter.speak(text, { onEnd: this._ender('_isDirectSpeaking') });
     if (!started) this._isDirectSpeaking = false;
     return started;
   }
@@ -128,6 +126,7 @@ export class VoiceManager {
     this._queue = [];
     this._isQueuedSpeaking = false;
     this._isDirectSpeaking = false;
+    this._token++;
     this._adapter.cancel();
   }
 

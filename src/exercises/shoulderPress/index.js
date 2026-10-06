@@ -2,7 +2,8 @@
 
 import { formatTrackingResult } from '../../core/trackingSettings';
 import { ShoulderPressFlow, SP_PHASE } from './ShoulderPressFlow';
-import { SP_FEEDBACK } from './config';
+import { clampPct } from '../../core/repScoring';
+import { SP_CFG, SP_FEEDBACK } from './config';
 import {
   drawStanceGuides, drawTorsoLeanGuides, drawShoulderLevelGuides,
   drawAllToleranceGuides, drawHeightBar, drawScoreChip,
@@ -43,6 +44,12 @@ function createShoulderPressTracker(options = {}) {
           metric: done.score,
           score: done.score,
           heightPct: done.heightPct,
+          romPct: clampPct((done.heightPct / (SP_CFG.top_height_ratio * 100)) * 100),
+          lockoutPct: clampPct((done.maxAngle / SP_CFG.lockout_angle_min) * 100),
+          maxAngle: done.maxAngle,
+          maxElbowDrop: done.maxElbowDrop,
+          groups: done.groups,
+          issues: done.errors,
         };
       }
 

@@ -3,7 +3,9 @@
 
 import { nowSec } from '../../core/landmarks';
 import { VoiceManager } from '../../core/voiceManager.js';
-import { SIDE_PUSHUP_CFG, SIDE_PUSHUP_FEEDBACK, FORM_COLORS } from './config';
+import { createScoreAverager } from '../../core/repScoring';
+import { SIDE_PUSHUP_CFG, SIDE_PUSHUP_FEEDBACK, FORM_COLORS, SIDE_PUSHUP_UP_THRESHOLD } from './config';
+import { scoreSidePushUpRep } from './repScore';
 import {
   SidePushUpRepTracker,
   sidePushupLandmarksVisible,
@@ -47,8 +49,12 @@ function createSidePushUpTracker(options = {}) {
   const voice = new VoiceManager();
   const rep = new SidePushUpRepTracker();
   let repErrorKeys = new Set();
-  let formScore = 100;
+  const scores = createScoreAverager();
   let downStartT = -1;
+  let cycleStartT = -1;
+  let cycleMinAngle = 180;
+  let hipDevSum = 0;
+  let hipDevN = 0;
   let readyVoiceSent = false;
   let doneVoiceSent = false;
   let lastLiveCueKey = '';
@@ -71,8 +77,12 @@ function createSidePushUpTracker(options = {}) {
     reset() {
       rep.reset();
       repErrorKeys = new Set();
-      formScore = 100;
+      scores.reset();
       downStartT = -1;
+      cycleStartT = -1;
+      cycleMinAngle = 180;
+      hipDevSum = 0;
+      hipDevN = 0;
       readyVoiceSent = false;
       doneVoiceSent = false;
       lastLiveCueKey = '';
@@ -87,7 +97,7 @@ function createSidePushUpTracker(options = {}) {
           repCount: rep.count,
           phase: 'idle',
           progress: 0,
-          formScore: Math.round(formScore),
+          formScore: scores.value,
           ready: false,
           cues: [{ level: 'info', text: 'Turn sideways so your full profile is visible' }],
           feedback: null,
@@ -110,12 +120,18 @@ function createSidePushUpTracker(options = {}) {
         repErrorKeys = new Set();
         downStartT = nowSec();
       }
+      if (cycleStartT < 0 && elbowAngle < SIDE_PUSHUP_UP_THRESHOLD) cycleStartT = nowSec();
+      if (cycleStartT >= 0) cycleMinAngle = Math.min(cycleMinAngle, elbowAngle);
 
       let posture = null;
       if (sidePushupPostureLandmarksVisible(landmarks, visibleSide)) {
         const evalState = stateBefore === 'DOWN' ? 'DOWN' : rep.state;
         posture = evaluateSidePushUpPosture(landmarks, elbowAngle, evalState, visibleSide);
         for (const key of posture.cueKeys) repErrorKeys.add(key);
+        if (cycleStartT >= 0 && Number.isFinite(posture.hipDevRatio)) {
+          hipDevSum += posture.hipDevRatio;
+          hipDevN += 1;
+        }
 
         // Live voice during the rep
         const primaryKey = posture.cueKeys[0];
@@ -134,11 +150,18 @@ function createSidePushUpTracker(options = {}) {
       let feedback = null;
       if (completed) {
         const n = rep.count;
-        const durationSec = downStartT > 0 ? +(nowSec() - downStartT).toFixed(2) : null;
+        const startT = cycleStartT >= 0 ? cycleStartT : downStartT;
+        const durationSec = startT > 0 ? +(nowSec() - startT).toFixed(2) : null;
         const primary = selectPrimaryError(repErrorKeys);
         const good = primary == null;
         feedback = primary ? SIDE_PUSHUP_FEEDBACK[primary.key] || primary.label : `Rep ${n} — nice work!`;
-        formScore = Math.max(0, Math.min(100, formScore - (good ? 0 : 10) + (good ? 4 : 0)));
+        const scored = scoreSidePushUpRep({
+          errors: [...repErrorKeys],
+          durationSec,
+          minAngle: cycleMinAngle,
+          hipDevMean: hipDevN ? hipDevSum / hipDevN : 0,
+        });
+        scores.push(scored.score);
 
         if (primary) {
           speakQueued(SIDE_PUSHUP_FEEDBACK[primary.key] || primary.label, {
@@ -164,9 +187,14 @@ function createSidePushUpTracker(options = {}) {
           errors: [...repErrorKeys],
           good,
           metric: +elbowAngle.toFixed(1),
+          ...scored,
         };
         repErrorKeys = new Set();
         downStartT = -1;
+        cycleStartT = -1;
+        cycleMinAngle = 180;
+        hipDevSum = 0;
+        hipDevN = 0;
       }
 
       const cues = [];
@@ -186,7 +214,7 @@ function createSidePushUpTracker(options = {}) {
         repCount: rep.count,
         phase: rep.state === 'DOWN' ? 'down' : 'up',
         progress: progressFor(elbowAngle),
-        formScore: Math.round(formScore),
+        formScore: scores.value,
         ready: true,
         cues,
         feedback,

@@ -12,6 +12,7 @@ export {
   resolveExerciseId,
   availableViews,
   isSupported,
+  isTimedExercise,
   listExercises,
 } from './core/registry';
 
@@ -42,6 +43,12 @@ export {
   getFrontRaiseToleranceConfig,
   getDumbbellCurlToleranceConfig,
 } from './exercises/toleranceDefinitions.js';
+
+export {
+  CALIBRATION_FAMILIES,
+  detectPoseInImage,
+  drawCalibrationOverlay,
+} from './calibration/snapshotOverlay.js';
 
 export {
   LR_CFG,

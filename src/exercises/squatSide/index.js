@@ -1,7 +1,9 @@
 // Side-view squat — delegates to SquatSideFlow (same state machine as front view).
 
 import { formatTrackingResult } from '../../core/trackingSettings';
+import { createScoreAverager } from '../../core/repScoring';
 import { SquatSideFlow, SIDE_PHASE } from './SquatSideFlow.js';
+import { scoreSquatRep } from '../squat/repScore';
 import { drawSideSquatTorsoTolerance } from './draw.js';
 import {
   drawStandingGuideBox,
@@ -13,12 +15,14 @@ function createSideSquatTracker(options = {}) {
   const flow = new SquatSideFlow(options);
   let lastRep = 0;
   let lastFr = null;
+  const scores = createScoreAverager();
 
   return {
     reset() {
       flow.reset();
       lastRep = 0;
       lastFr = null;
+      scores.reset();
     },
 
     setTargetReps(n) {
@@ -33,6 +37,8 @@ function createSideSquatTracker(options = {}) {
         lastRep = state.repCount;
         const metrics = lastFr.squatTracker?.repMetrics?.at(-1);
         const errors = metrics?.voice_keys || [];
+        const scored = scoreSquatRep(metrics);
+        scores.push(scored.score);
         state.repEvent = {
           index: lastRep,
           durationSec: metrics?.total_rep_sec ?? null,
@@ -43,8 +49,10 @@ function createSideSquatTracker(options = {}) {
           good: errors.length === 0 && !lastFr.activeFeedback,
           metric: metrics?.peak_depth_pct ?? null,
           speedCue: metrics?.speed_cue ?? null,
+          ...scored,
         };
       }
+      if (scores.count) state.formScore = scores.value;
 
       state.tracking = formatTrackingResult(state);
       return state;

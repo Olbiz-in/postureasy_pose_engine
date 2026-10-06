@@ -12,6 +12,7 @@ const DEFAULTS = {
   modelUrl:
     'https://storage.googleapis.com/mediapipe-models/pose_landmarker/pose_landmarker_lite/float16/1/pose_landmarker_lite.task',
   delegate: 'GPU',
+  runningMode: 'VIDEO',
   numPoses: 1,
   minPoseDetectionConfidence: 0.5,
   minPosePresenceConfidence: 0.5,
@@ -62,7 +63,8 @@ function toError(err, context) {
 }
 
 /**
- * Create a PoseLandmarker configured for streaming video.
+ * Create a PoseLandmarker configured for streaming video (or still images with
+ * `{ runningMode: 'IMAGE' }`).
  *
  * The GPU (WebGL) delegate is preferred but is not available on every browser /
  * driver; if it fails to initialize we transparently fall back to the CPU
@@ -84,7 +86,7 @@ export async function createPoseLandmarker(options = {}) {
     withTimeout(
       PoseLandmarker.createFromOptions(vision, {
         baseOptions: { modelAssetPath: cfg.modelUrl, delegate },
-        runningMode: 'VIDEO',
+        runningMode: cfg.runningMode,
         numPoses: cfg.numPoses,
         minPoseDetectionConfidence: cfg.minPoseDetectionConfidence,
         minPosePresenceConfidence: cfg.minPosePresenceConfidence,

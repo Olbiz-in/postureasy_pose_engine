@@ -2,7 +2,9 @@
 
 import { LM, midpoint, shoulderWidth } from '../../core/landmarks';
 import { formatTrackingResult } from '../../core/trackingSettings';
+import { createScoreAverager } from '../../core/repScoring';
 import { SquatFlow, PHASE } from './SquatFlow';
+import { scoreSquatRep } from './repScore';
 import {
   drawStandingGuideBox,
   drawStanceAnkleWidthGuides,
@@ -15,12 +17,14 @@ function createSquatTracker(options = {}) {
   const flow = new SquatFlow(options);
   let lastRep = 0;
   let lastFr = null;
+  const scores = createScoreAverager();
 
   return {
     reset() {
       flow.reset();
       lastRep = 0;
       lastFr = null;
+      scores.reset();
     },
 
     setTargetReps(n) {
@@ -35,6 +39,8 @@ function createSquatTracker(options = {}) {
         lastRep = state.repCount;
         const metrics = lastFr.squatTracker?.repMetrics?.at(-1);
         const errors = metrics?.voice_keys || [];
+        const scored = scoreSquatRep(metrics);
+        scores.push(scored.score);
         state.repEvent = {
           index: lastRep,
           durationSec: metrics?.total_rep_sec ?? null,
@@ -45,8 +51,10 @@ function createSquatTracker(options = {}) {
           good: errors.length === 0 && !lastFr.activeFeedback,
           metric: metrics?.peak_depth_pct ?? null,
           speedCue: metrics?.speed_cue ?? null,
+          ...scored,
         };
       }
+      if (scores.count) state.formScore = scores.value;
 
       state.tracking = formatTrackingResult(state);
       return state;

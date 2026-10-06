@@ -26,6 +26,10 @@
 //   cues          {level,text}[]    live coaching cues (level: ok|info|warn|bad)
 //   feedback      string|null       end-of-rep feedback to announce, once
 //   ready         boolean           true once calibrated / person detected
+//
+// Timed (hold) exercises set `timed: true` on the definition, accept
+// `targetSeconds` in create(), keep repCount at 0 and additionally report
+// holdSec / targetSec / holdComplete. Their tracker exposes finish() → summary.
 
 const _exercises = new Map();
 const _aliasIndex = new Map();
@@ -65,7 +69,12 @@ export function resolveExerciseId(nameOrId, view) {
   // variant (e.g. "Decline Push-ups", "Goblet Squat") maps to that family so the
   // matching tracker is used. Unrelated movements stay unsupported.
   if (!baseId) {
-    if (/(shoulder|overhead)\s*press/.test(key)) baseId = _aliasIndex.get('shoulder press') || null;
+    if (/\bplanks?\b/.test(key)) {
+      // Static front planks only; side planks and dynamic plank variants are different movements.
+      if (!/side|jack|walk|tap|twist|rotat|reach|knee|up\b|to\b|copenhagen|reverse|saw|dip/.test(key)) {
+        baseId = _aliasIndex.get('plank') || null;
+      }
+    } else if (/(shoulder|overhead)\s*press/.test(key)) baseId = _aliasIndex.get('shoulder press') || null;
     else if (/lateral\s*raise/.test(key)) baseId = _aliasIndex.get('lateral raise') || null;
     else if (/front\s*raise/.test(key) && !/alternat|seated|plate|barbell|cable/.test(key)) baseId = _aliasIndex.get('front raise') || null;
     else if (key.includes('squat')) baseId = _aliasIndex.get('squat') || 'squat';
@@ -103,5 +112,11 @@ export function isSupported(nameOrId) {
 }
 
 export function listExercises() {
-  return [..._exercises.values()].map(({ id, name, facing }) => ({ id, name, facing }));
+  return [..._exercises.values()].map(({ id, name, facing, timed }) => ({ id, name, facing, timed: !!timed }));
+}
+
+/** True when the exercise is a timed hold (seconds) rather than a rep count. */
+export function isTimedExercise(nameOrId) {
+  const id = resolveExerciseId(nameOrId);
+  return !!(id && _exercises.get(id)?.timed);
 }
