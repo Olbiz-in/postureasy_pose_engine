@@ -714,10 +714,11 @@ export function drawTempoTimer(ctx, squat, w) {
   ctx.restore();
 }
 
-export function drawTempoResultBanner(ctx, squat, w, h) {
+export function drawTempoResultBanner(ctx, squat, w, h, showTempoMistake = true) {
   if (!squat.tempoResultVisible()) return;
   const d      = squat.lastTempoDuration;
   const result = squat.lastTempoResult;
+  if (result !== 'good' && !showTempoMistake) return;
   let msg, col;
   if (result === 'good')      { msg = `Good tempo — ${d.toFixed(1)}s`; col = 'rgb(0,255,0)'; }
   else if (result === 'fast') { msg = `Too fast — ${d.toFixed(1)}s`;   col = 'rgb(255,0,0)'; }
@@ -730,11 +731,11 @@ export function drawTempoResultBanner(ctx, squat, w, h) {
   ctx.restore();
 }
 
-export function drawTempoGateOverlay(ctx, squat, w, h) {
+export function drawTempoGateOverlay(ctx, squat, w, h, showTempoMistake = true) {
   drawTempoGateLine(ctx, squat, w, h);
   drawTempoGateHipDot(ctx, squat, w, h);
   drawTempoTimer(ctx, squat, w);
-  drawTempoResultBanner(ctx, squat, w, h);
+  drawTempoResultBanner(ctx, squat, w, h, showTempoMistake);
 }
 
 // ---------------------------------------------------------------------------

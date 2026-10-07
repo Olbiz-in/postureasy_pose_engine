@@ -20,6 +20,7 @@ import {
   FR_COLOR_GREEN, FR_COLOR_AMBER, FR_COLOR_RED, FR_COLOR_GREY,
 } from './config.js';
 import { LandmarkSmoother } from '../common/landmarkSmoother.js';
+import { RepeatMistakeGate } from '../common/repeatMistakeGate.js';
 import { firstByPriority, median, clamp, fmt } from '../common/math.js';
 import { buildGeometry, evaluateStance, facingRatio, armLift } from './poseChecks.js';
 import { FrontRaiseRepTracker, summarizeFrontRaise } from './FrontRaiseRepTracker.js';
@@ -89,6 +90,7 @@ export class FrontRaiseFlow {
     this._lastTickAt = -1;
 
     this._cueOnset = new Map();
+    this._mistakeGate = new RepeatMistakeGate();
     this._mistake = '';
     this._mistakeUntil = -1;
     this._feedback = '';
@@ -380,6 +382,7 @@ export class FrontRaiseFlow {
     const elapsed = now - this._readyStart;
     if (elapsed >= FR_CFG.ready_min_sec && (!this._voiceBusy() || elapsed >= FR_CFG.ready_max_sec)) {
       this._rep.startSet(this._currentSet);
+      this._mistakeGate.reset();
       this._phase = FR_PHASE.ACTIVE;
       this._lastMoveAt = -Infinity;
       this._notExSince = now;
@@ -439,14 +442,16 @@ export class FrontRaiseFlow {
 
     const res = rep.update(g, this._calib, now);
     if (rep.inProgress) this._lastMoveAt = now;
+    this._mistakeGate.track(rep.inProgress);
     const exercising = rep.inProgress || now - this._lastMoveAt <= FR_CFG.idle_seconds;
     this._setActivity(exercising, exercising ? 'fr_rep_in_progress' : 'fr_arms_resting', now);
     if (exercising) this._activeSec += dt;
 
     const sustained = rep.inProgress ? this._sustained(res.liveKeys, now) : this._sustained([], now);
-    const primaryLive = sustained.includes('fr_too_high')
+    const shownLive = this._mistakeGate.filter(sustained);
+    const primaryLive = shownLive.includes('fr_too_high')
       ? 'fr_too_high'
-      : sustained[0] || null;
+      : shownLive[0] || null;
     if (primaryLive) {
       this._setFeedback(FR_FEEDBACK[primaryLive], now, 1.0);
       this._setMistake(primaryLive, now, LIVE_MISTAKE_HOLD_SEC);
@@ -474,7 +479,7 @@ export class FrontRaiseFlow {
 
     return this._result(g, now, {
       status,
-      statusKind: sustained.length ? 'warn' : 'ok',
+      statusKind: shownLive.length ? 'warn' : 'ok',
       boneColor,
       activity: this._activity,
       activityReason: this._activityReason,
@@ -495,7 +500,7 @@ export class FrontRaiseFlow {
   /** @returns {boolean} true when this attempt finished the current set. */
   _onAttempt(a, now) {
     const rep = this._rep;
-    const issue = a.primaryIssue;
+    const issue = this._mistakeGate.endRep(a.issues)[0] || null;
     const setDone = this._targetReps > 0 && rep.setCount >= this._targetReps;
 
     // The count is the only thing front raise ever says during the workout.
@@ -506,7 +511,8 @@ export class FrontRaiseFlow {
     const setPart = this._targetSets > 0 ? `Set ${this._currentSet} of ${this._targetSets}, ` : '';
     const repPart = this._targetReps > 0 ? `Rep ${a.repInSet} of ${this._targetReps}` : `Rep ${a.repInSet}`;
     this._setBanner(`${setPart}${repPart}${a.clean ? ' ✓' : ''}`, now, 2.0);
-    this._setFeedback(issue ? FR_FEEDBACK[issue] : 'Good rep!', now);
+    if (issue) this._setFeedback(FR_FEEDBACK[issue], now);
+    else if (!a.issues.length) this._setFeedback('Good rep!', now);
     if (issue) this._setMistake(issue, now, REP_MISTAKE_HOLD_SEC);
     return setDone;
   }

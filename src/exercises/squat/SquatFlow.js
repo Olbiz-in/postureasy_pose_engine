@@ -27,9 +27,10 @@ import { SquatRepTracker } from './SquatRepTracker.js';
 import { KneeAngleRepMonitor } from './kneeMonitor.js';
 import { TorsoBendRepMonitor } from './torsoMonitor.js';
 import { ShoulderLevelRepMonitor } from './shoulderMonitor.js';
-import { getRepSpeedWarningKey, selectRepPostureWarning } from './warningPriority';
+import { getRepSpeedWarningKey, listRepPostureWarnings } from './warningPriority';
 import { LM, CFG, nowSec, COLOR_GREEN, COLOR_AMBER, COLOR_RED } from './config.js';
 import { VoiceManager } from '../../core/voiceManager.js';
+import { RepeatMistakeGate } from '../common/repeatMistakeGate.js';
 import { lockTempoGateAtStance } from './draw.js';
 
 // ── Phase constants ───────────────────────────────────────────────────────────
@@ -126,6 +127,7 @@ export class SquatFlow {
     this._kneeMon = new KneeAngleRepMonitor();
     this._torsoMon = new TorsoBendRepMonitor();
     this._shoulderMon = new ShoulderLevelRepMonitor();
+    this._mistakeGate = new RepeatMistakeGate();
     this._wasInSquat = false;
     this._phase = PHASE.WAITING_FOR_PERSON;
     this._repCount = 0;
@@ -740,6 +742,7 @@ export class SquatFlow {
           kneeMon.onRepStart();
           torsoMon.onRepStart();
           shoulderMon.onRepStart();
+          this._mistakeGate.startRep();
         }
         kneeMon.updateFrame(landmarks);
         torsoMon.updateFrame(landmarks);
@@ -759,7 +762,18 @@ export class SquatFlow {
 
         // All end-of-rep voice lines are queued so feedback finishes before "Do rep N".
         const lastRep = sq.repMetrics[sq.repMetrics.length - 1];
-        if (lastRep && !lastRep.full_depth) {
+        const speedKey    = getRepSpeedWarningKey(sq);
+        const kneeMsg     = kneeMon.consumeEndOfRepFeedback();
+        const torsoMsg    = torsoMon.consumeEndOfRepFeedback();
+        const shoulderMsg = shoulderMon.consumeEndOfRepFeedback();
+        const warnings    = listRepPostureWarnings({ speedKey, kneeMsg, torsoMsg, shoulderMsg });
+        const tooEarly    = !!(lastRep && !lastRep.full_depth);
+        const repeated    = new Set(this._mistakeGate.endRep([
+          tooEarly && VOICE_MSG.too_early,
+          lastRep?.too_deep && VOICE_MSG.too_deep,
+          ...warnings.map((w) => w.text),
+        ]));
+        if (tooEarly && repeated.has(VOICE_MSG.too_early)) {
           console.log(`[Flow] Rep ${n} was partial → "standing up too early"`);
           this._speakQueued(VOICE_MSG.too_early, { key: 'too_early' });
           this._activeFeedback = (VOICE_MSG.too_early);
@@ -786,11 +800,7 @@ export class SquatFlow {
         }
 
         // Per-rep posture voice: speed → knee → torso → shoulder (exactly one).
-        const speedKey    = getRepSpeedWarningKey(sq);
-        const kneeMsg     = kneeMon.consumeEndOfRepFeedback();
-        const torsoMsg    = torsoMon.consumeEndOfRepFeedback();
-        const shoulderMsg = shoulderMon.consumeEndOfRepFeedback();
-        const warning     = selectRepPostureWarning({ speedKey, kneeMsg, torsoMsg, shoulderMsg });
+        const warning = warnings.find((w) => repeated.has(w.text));
         if (warning) {
           console.log(`[Flow] Rep ${n} warning (${warning.kind}) → "${warning.text}"`);
           this._speakQueued(warning.text, { key: warning.key });
@@ -814,7 +824,7 @@ export class SquatFlow {
         this._speak(VOICE_MSG.calibrate, { key: feedbackKey, cooldownMs: VOICE_CD_MS });
       }
       // P1 — Excessive depth (live)
-      else if (sq.tooDeep) {
+      else if (sq.tooDeep && this._mistakeGate.allows(VOICE_MSG.too_deep)) {
         feedbackText = VOICE_MSG.too_deep;
         feedbackKey  = 'too_deep';
       }
@@ -829,6 +839,10 @@ export class SquatFlow {
           } else if (sw2.includes('slow')) {
             feedbackText = VOICE_MSG.too_slow;
             feedbackKey  = 'too_slow';
+          }
+          if (!this._mistakeGate.allows(feedbackText)) {
+            feedbackText = '';
+            feedbackKey  = '';
           }
         }
       }
@@ -884,6 +898,7 @@ export class SquatFlow {
     this._kneeMon     = new KneeAngleRepMonitor();
     this._torsoMon    = new TorsoBendRepMonitor();
     this._shoulderMon = new ShoulderLevelRepMonitor();
+    this._mistakeGate.reset();
     this._wasInSquat   = false;
     // Clear torso calibration so the next session re-captures standing height.
     resetTorsoCalibration();

@@ -4,6 +4,7 @@
 import { nowSec } from '../../core/landmarks';
 import { VoiceManager } from '../../core/voiceManager.js';
 import { createScoreAverager } from '../../core/repScoring';
+import { RepeatMistakeGate } from '../common/repeatMistakeGate.js';
 import { SIDE_PUSHUP_CFG, SIDE_PUSHUP_FEEDBACK, FORM_COLORS, SIDE_PUSHUP_UP_THRESHOLD } from './config';
 import { scoreSidePushUpRep } from './repScore';
 import {
@@ -49,6 +50,7 @@ function createSidePushUpTracker(options = {}) {
   const voice = new VoiceManager();
   const rep = new SidePushUpRepTracker();
   let repErrorKeys = new Set();
+  const mistakeGate = new RepeatMistakeGate();
   const scores = createScoreAverager();
   let downStartT = -1;
   let cycleStartT = -1;
@@ -77,6 +79,7 @@ function createSidePushUpTracker(options = {}) {
     reset() {
       rep.reset();
       repErrorKeys = new Set();
+      mistakeGate.reset();
       scores.reset();
       downStartT = -1;
       cycleStartT = -1;
@@ -119,6 +122,7 @@ function createSidePushUpTracker(options = {}) {
       if (stateBefore !== 'DOWN' && rep.state === 'DOWN') {
         repErrorKeys = new Set();
         downStartT = nowSec();
+        mistakeGate.startRep();
       }
       if (cycleStartT < 0 && elbowAngle < SIDE_PUSHUP_UP_THRESHOLD) cycleStartT = nowSec();
       if (cycleStartT >= 0) cycleMinAngle = Math.min(cycleMinAngle, elbowAngle);
@@ -134,14 +138,14 @@ function createSidePushUpTracker(options = {}) {
         }
 
         // Live voice during the rep
-        const primaryKey = posture.cueKeys[0];
+        const primaryKey = mistakeGate.allows(posture.cueKeys[0]) ? posture.cueKeys[0] : '';
         if (primaryKey && primaryKey !== lastLiveCueKey) {
           const msg = SIDE_PUSHUP_FEEDBACK[primaryKey];
           if (msg) {
             speak(msg, { key: `side_pu_live_${primaryKey}`, cooldownMs: VOICE_CD_MS });
           }
         }
-        lastLiveCueKey = primaryKey || '';
+        lastLiveCueKey = primaryKey;
       } else {
         lastLiveCueKey = '';
       }
@@ -154,7 +158,9 @@ function createSidePushUpTracker(options = {}) {
         const durationSec = startT > 0 ? +(nowSec() - startT).toFixed(2) : null;
         const primary = selectPrimaryError(repErrorKeys);
         const good = primary == null;
-        feedback = primary ? SIDE_PUSHUP_FEEDBACK[primary.key] || primary.label : `Rep ${n} — nice work!`;
+        const shown = selectPrimaryError(mistakeGate.endRep([...repErrorKeys]));
+        if (shown) feedback = SIDE_PUSHUP_FEEDBACK[shown.key] || shown.label;
+        else if (good) feedback = `Rep ${n} — nice work!`;
         const scored = scoreSidePushUpRep({
           errors: [...repErrorKeys],
           durationSec,
@@ -163,11 +169,11 @@ function createSidePushUpTracker(options = {}) {
         });
         scores.push(scored.score);
 
-        if (primary) {
-          speakQueued(SIDE_PUSHUP_FEEDBACK[primary.key] || primary.label, {
-            key: `side_pu_rep_${n}_${primary.key}`,
+        if (shown) {
+          speakQueued(SIDE_PUSHUP_FEEDBACK[shown.key] || shown.label, {
+            key: `side_pu_rep_${n}_${shown.key}`,
           });
-        } else {
+        } else if (good) {
           speakQueued(`Rep ${n}. Nice work!`, { key: `side_pu_rep_${n}_good` });
         }
 
@@ -198,9 +204,10 @@ function createSidePushUpTracker(options = {}) {
       }
 
       const cues = [];
-      if (posture && posture.primaryColorKey === 'red') {
+      const primaryShown = posture && mistakeGate.allows(posture.cueKeys[0]);
+      if (primaryShown && posture.primaryColorKey === 'red') {
         cues.push({ level: 'bad', text: posture.primaryMessage });
-      } else if (posture && posture.primaryColorKey === 'yellow') {
+      } else if (primaryShown && posture.primaryColorKey === 'yellow') {
         cues.push({ level: 'warn', text: posture.primaryMessage });
       } else if (rep.state === 'DOWN') {
         cues.push({ level: 'ok', text: 'Lower with control — keep your back straight' });

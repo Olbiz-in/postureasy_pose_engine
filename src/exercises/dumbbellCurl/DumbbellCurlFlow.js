@@ -25,6 +25,7 @@ import {
   DC_COLOR_GREEN, DC_COLOR_AMBER, DC_COLOR_RED, DC_COLOR_GREY,
 } from './config.js';
 import { LandmarkSmoother } from '../common/landmarkSmoother.js';
+import { RepeatMistakeGate } from '../common/repeatMistakeGate.js';
 import { firstByPriority, median, clamp, clamp01, fmt } from '../common/math.js';
 import { buildCurlGeometry, evaluateCurlStance, facingRatio, curlProgress } from './poseChecks.js';
 import { DumbbellCurlRepTracker, summarizeDumbbellCurl } from './DumbbellCurlRepTracker.js';
@@ -87,6 +88,7 @@ export class DumbbellCurlFlow {
     this._lastTickAt = -1;
 
     this._cueOnset = new Map();
+    this._mistakeGate = new RepeatMistakeGate();
     this._mistake = '';
     this._mistakeUntil = -1;
     this._feedback = '';
@@ -369,6 +371,7 @@ export class DumbbellCurlFlow {
     const elapsed = now - this._readyStart;
     if (elapsed >= DC_CFG.ready_min_sec && (!this._voiceBusy() || elapsed >= DC_CFG.ready_max_sec)) {
       this._rep.startSet(this._currentSet);
+      this._mistakeGate.reset();
       this._phase = DC_PHASE.ACTIVE;
       this._lastMoveAt = -Infinity;
       this._notExSince = now;
@@ -432,12 +435,14 @@ export class DumbbellCurlFlow {
 
     const res = rep.update(g, this._calib, now);
     if (rep.inProgress) this._lastMoveAt = now;
+    this._mistakeGate.track(rep.inProgress);
     const exercising = rep.inProgress || now - this._lastMoveAt <= DC_CFG.idle_seconds;
     this._setActivity(exercising, exercising ? 'dc_rep_in_progress' : 'dc_arms_resting', now);
     if (exercising) this._activeSec += dt;
 
     const sustained = this._sustained(rep.inProgress ? res.liveKeys : [], now);
-    const primaryLive = sustained.length ? firstByPriority(sustained, DC_LIVE_PRIORITY) : null;
+    const shownLive = this._mistakeGate.filter(sustained);
+    const primaryLive = shownLive.length ? firstByPriority(shownLive, DC_LIVE_PRIORITY) : null;
     if (primaryLive) {
       this._setFeedback(DC_FEEDBACK[primaryLive], now, 1.0);
       this._setMistake(primaryLive, now, LIVE_MISTAKE_HOLD_SEC);
@@ -464,7 +469,7 @@ export class DumbbellCurlFlow {
 
     return this._result(g, now, {
       status,
-      statusKind: sustained.length ? 'warn' : 'ok',
+      statusKind: shownLive.length ? 'warn' : 'ok',
       boneColor,
       activity: this._activity,
       activityReason: this._activityReason,
@@ -477,22 +482,23 @@ export class DumbbellCurlFlow {
   /** @returns {boolean} true when this attempt finished the current set. */
   _onAttempt(a, now) {
     const rep = this._rep;
-    const issue = a.primaryIssue;
+    const repIssues = a.issues.length ? a.issues : (a.counted ? [] : ['dc_incomplete']);
+    const issue = this._mistakeGate.endRep(repIssues)[0] || null;
     const setDone = this._targetReps > 0 && rep.setCount >= this._targetReps;
 
     if (a.counted) {
       const setPart = this._targetSets > 0 ? `Set ${this._currentSet} of ${this._targetSets}, ` : '';
       const repPart = this._targetReps > 0 ? `Rep ${a.repInSet} of ${this._targetReps}` : `Rep ${a.repInSet}`;
       this._setBanner(`${setPart}${repPart}${a.clean ? ' ✓' : ''}`, now, 2.0);
-      this._setFeedback(issue ? this._issueText(issue) : 'Good rep!', now);
+      if (issue) this._setFeedback(this._issueText(issue), now);
+      else if (!repIssues.length) this._setFeedback('Good rep!', now);
       this._speakQueued(DC_VOICE_MSG.rep(a.repInSet), { key: `dc_rep_${this._currentSet}_${a.repInSet}_${a.attempt}` });
     } else {
       this._setBanner('Rep not counted', now, 2.0);
-      this._setFeedback(this._issueText(issue || 'dc_incomplete'), now);
+      if (issue) this._setFeedback(this._issueText(issue), now);
     }
 
     if (issue) this._setMistake(issue, now, REP_MISTAKE_HOLD_SEC);
-    else if (!a.counted) this._setMistake('dc_incomplete', now, REP_MISTAKE_HOLD_SEC);
     return setDone;
   }
 

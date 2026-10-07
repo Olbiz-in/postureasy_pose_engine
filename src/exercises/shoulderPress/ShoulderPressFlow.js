@@ -22,7 +22,8 @@ import {
   buildGeometry, evaluateFeet, evaluateShoulderSetup, evaluatePressPosture,
   earShoulderGaps, armZone, isRacked,
 } from './poseChecks.js';
-import { ShoulderPressRepTracker } from './ShoulderPressRepTracker.js';
+import { ShoulderPressRepTracker, selectPrimaryError } from './ShoulderPressRepTracker.js';
+import { RepeatMistakeGate } from '../common/repeatMistakeGate.js';
 
 export const SP_PHASE = {
   WAITING_FOR_PERSON: 'sp_waiting_for_person',
@@ -113,6 +114,7 @@ export class ShoulderPressFlow {
     this._baselineSamples = { left: [], right: [] };
     this._baseline = null;
     this._cueOnset = new Map();
+    this._mistakeGate = new RepeatMistakeGate();
     this._lastLiveCueAt = -1;
     this._lastInstructionKey = '';
     this._lastInstructionAt = -1;
@@ -429,6 +431,7 @@ export class ShoulderPressFlow {
     if (now - this._rackSince >= RACK_HOLD_SEC) {
       this._rep.reset();
       this._cueOnset.clear();
+      this._mistakeGate.reset();
       this._lastSeenRep = 0;
       this._doRepOneVoiceSent = false;
       this._readyStart = now;
@@ -504,21 +507,24 @@ export class ShoulderPressFlow {
     const posture = inPress ? evaluatePressPosture(g, { baseline: this._baseline, zone }) : null;
     const prevCount = rep.count;
     const res = rep.update(g, now, posture?.cueKeys || []);
+    this._mistakeGate.track(rep.state !== 'WAITING');
     const liveKeys = [...(posture?.cueKeys || []), res.liveDepthCue].filter(Boolean);
     const sustained = inPress ? this._sustained(liveKeys, now) : this._sustained([], now);
+    const shownSustained = this._mistakeGate.filter(sustained);
+    const shownEvent = this._mistakeGate.allows(res.event) ? res.event : null;
 
     let feedbackText = '';
 
     // Rep-level events (aborted press / shallow dip) — queued, never immediate.
-    if (res.event) {
-      feedbackText = SP_FEEDBACK[res.event] || '';
-      this._speakQueued(SP_VOICE_MSG[res.event], { key: `sp_evt_${res.event}`, cooldownMs: 6000 });
+    if (shownEvent) {
+      feedbackText = SP_FEEDBACK[shownEvent] || '';
+      this._speakQueued(SP_VOICE_MSG[shownEvent], { key: `sp_evt_${shownEvent}`, cooldownMs: 6000 });
       this._lastLiveCueAt = now;
     }
 
     // Live correction — one message, highest priority; does not cancel "Do rep N".
-    const primary = firstByPriority(sustained, SP_LIVE_PRIORITY);
-    if (primary && !res.event) {
+    const primary = firstByPriority(shownSustained, SP_LIVE_PRIORITY);
+    if (primary && !shownEvent) {
       feedbackText = SP_FEEDBACK[primary] || feedbackText;
       this._speakLiveCue(primary, now);
     }
@@ -538,7 +544,7 @@ export class ShoulderPressFlow {
     }
 
     if (feedbackText) this._activeFeedback = feedbackText;
-    else if (!sustained.length) this._activeFeedback = '';
+    else if (!shownSustained.length) this._activeFeedback = '';
 
     let boneColor = SP_COLOR_GREEN;
     if (sustained.length) boneColor = SP_COLOR_RED;
@@ -561,7 +567,7 @@ export class ShoulderPressFlow {
       postureResult: posture,
       sustainedCues: sustained,
       status: this._activeFeedback || status,
-      statusKind: sustained.length || res.event ? 'warn' : 'ok',
+      statusKind: shownSustained.length || shownEvent ? 'warn' : 'ok',
       activeFeedback: this._activeFeedback,
       repCompleted: res.rep,
     });
@@ -582,7 +588,7 @@ export class ShoulderPressFlow {
 
     // Rep-level faults known only at finalize — queue so they play before "Do rep N".
     const repLevel = ['sp_press_higher', 'sp_not_low_enough', 'sp_rep_fast', 'sp_too_deep'];
-    const err = result.primaryError;
+    const err = selectPrimaryError(this._mistakeGate.endRep(result.errors));
     if (err && repLevel.includes(err) && SP_VOICE_MSG[err]) {
       this._speakQueued(SP_VOICE_MSG[err], { key: `sp_rep_${err}_${n}`, cooldownMs: VOICE_CD_MS });
       this._activeFeedback = SP_FEEDBACK[err] || this._activeFeedback;

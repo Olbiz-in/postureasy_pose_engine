@@ -10,9 +10,11 @@ import {
 import { SquatRepTracker } from '../squat/SquatRepTracker.js';
 import { KneeAngleRepMonitor } from '../squat/kneeMonitor.js';
 import { TorsoBendSideRepMonitor } from './torsoMonitorSide.js';
-import { getRepSpeedWarningKey, selectRepPostureWarning } from '../squat/warningPriority';
+import { getRepSpeedWarningKey, listRepPostureWarnings, speedKeyToMessage } from '../squat/warningPriority';
 import { CFG, nowSec, COLOR_GREEN, COLOR_AMBER, COLOR_RED } from '../squat/config.js';
 import { VoiceManager } from '../../core/voiceManager.js';
+import { RepeatMistakeGate } from '../common/repeatMistakeGate.js';
+import { TORSO_FORWARD_BEND_MSG } from '../squat/torsoMonitor.js';
 import { lockSideTempoGateAtStance } from './draw.js';
 
 export const SIDE_PHASE = {
@@ -77,6 +79,7 @@ export class SquatSideFlow {
     this._sq = new SquatRepTracker();
     this._kneeMon = new KneeAngleRepMonitor();
     this._torsoMon = new TorsoBendSideRepMonitor();
+    this._mistakeGate = new RepeatMistakeGate();
     this._wasInSquat = false;
     this._phase = SIDE_PHASE.WAITING_FOR_PERSON;
     this._repCount = 0;
@@ -341,6 +344,7 @@ export class SquatSideFlow {
         if (!wasInSquat) {
           kneeMon.onRepStart();
           torsoMon.onRepStart();
+          this._mistakeGate.startRep();
         }
         kneeMon.updateFrame(landmarks);
         torsoMon.updateFrame(landmarks);
@@ -356,7 +360,17 @@ export class SquatSideFlow {
         this._lastSeenRep = n;
 
         const lastRep = sq.repMetrics[sq.repMetrics.length - 1];
-        if (lastRep && !lastRep.full_depth) {
+        const speedKey = getRepSpeedWarningKey(sq);
+        const kneeMsg = kneeMon.consumeEndOfRepFeedback();
+        const torsoMsg = torsoMon.consumeEndOfRepFeedback();
+        const warnings = listRepPostureWarnings({ speedKey, kneeMsg, torsoMsg });
+        const tooEarly = !!(lastRep && !lastRep.full_depth);
+        const repeated = new Set(this._mistakeGate.endRep([
+          tooEarly && VOICE_MSG.too_early,
+          lastRep?.too_deep && VOICE_MSG.too_deep,
+          ...warnings.map((w) => w.text),
+        ]));
+        if (tooEarly && repeated.has(VOICE_MSG.too_early)) {
           this._speakQueued(VOICE_MSG.too_early, { key: 'side_too_early' });
           this._activeFeedback = VOICE_MSG.too_early;
         }
@@ -381,10 +395,7 @@ export class SquatSideFlow {
           });
         }
 
-        const speedKey = getRepSpeedWarningKey(sq);
-        const kneeMsg = kneeMon.consumeEndOfRepFeedback();
-        const torsoMsg = torsoMon.consumeEndOfRepFeedback();
-        const warning = selectRepPostureWarning({ speedKey, kneeMsg, torsoMsg });
+        const warning = warnings.find((w) => repeated.has(w.text));
         if (warning) {
           this._speakQueued(warning.text, { key: 'side_' + warning.key });
           this._activeFeedback = warning.text;
@@ -402,7 +413,7 @@ export class SquatSideFlow {
         feedbackKey = 'calibrate';
         this._activeFeedback = feedbackText;
         this._speak(VOICE_MSG.calibrate, { key: 'side_calibrate', cooldownMs: VOICE_CD_MS });
-      } else if (sq.tooDeep) {
+      } else if (sq.tooDeep && this._mistakeGate.allows(VOICE_MSG.too_deep)) {
         feedbackText = VOICE_MSG.too_deep;
         feedbackKey = 'too_deep';
       } else {
@@ -414,6 +425,10 @@ export class SquatSideFlow {
           } else if (sw2.includes('slow')) {
             feedbackText = VOICE_MSG.too_slow;
             feedbackKey = 'too_slow';
+          }
+          if (!this._mistakeGate.allows(feedbackText)) {
+            feedbackText = '';
+            feedbackKey = '';
           }
         }
       }
@@ -442,6 +457,8 @@ export class SquatSideFlow {
         hipX, hipY, kneeX, kneeY, shoulderW: sw,
         stancePassedChecks: { standing_straight: true },
         currentStanceCheck: null,
+        leanMistakeShown: this._mistakeGate.allows(TORSO_FORWARD_BEND_MSG),
+        tempoMistakeShown: this._mistakeGate.allows(speedKeyToMessage(sq.lastTempoResult)),
       });
     }
 
@@ -464,6 +481,7 @@ export class SquatSideFlow {
     this._sq = new SquatRepTracker();
     this._kneeMon = new KneeAngleRepMonitor();
     this._torsoMon = new TorsoBendSideRepMonitor();
+    this._mistakeGate.reset();
     this._wasInSquat = false;
     this._phase = SIDE_PHASE.WAITING_FOR_PERSON;
     this._boundaryStableStart = -1;

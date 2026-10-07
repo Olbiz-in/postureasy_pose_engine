@@ -29,6 +29,7 @@ import {
   selectTooDeepCaptureKey,
   partitionPushUpCueKeys,
 } from './repErrorPriority.js';
+import { RepeatMistakeGate } from '../common/repeatMistakeGate.js';
 
 // ── Phase constants ────────────────────────────────────────────────────────────
 export const PUSHUP_PHASE = {
@@ -78,6 +79,7 @@ export class PushUpFlow {
     this._targetReps = targetReps;
     this._rep = new PushUpRepTracker();
     this._repAccum = createEmptyRepAccumulator();
+    this._mistakeGate = new RepeatMistakeGate();
     this._phase = PUSHUP_PHASE.WAITING_FOR_PERSON;
     this._repCount = 0;
     this._activeFeedback = '';
@@ -223,6 +225,7 @@ export class PushUpFlow {
         if (stateBefore !== 'DOWN' && rep.state === 'DOWN') {
           this._repAccum = createEmptyRepAccumulator();
           this._lastLiveCueKey = '';
+          this._mistakeGate.startRep();
         }
 
         if (pushupPostureLandmarksVisible(landmarks)) {
@@ -238,6 +241,7 @@ export class PushUpFlow {
           const n = rep.count;
           this._repCount = n;
           repCompleteErrors = [...this._repAccum.cues, ...this._repAccum.tooDeepKeys];
+          this._mistakeGate.endRep(repCompleteErrors);
 
           const target = this._targetReps;
           if (target > 0 && n >= target) {
@@ -269,7 +273,7 @@ export class PushUpFlow {
 
       // ── Live feedback during the rep (immediate voice, squat-style cooldown) ──
       if (rep.state === 'DOWN' && postureResult) {
-        const liveKey = selectLiveErrorKey(postureResult);
+        const liveKey = selectLiveErrorKey({ cueKeys: this._mistakeGate.filter(postureResult.cueKeys) });
         if (liveKey) {
           const liveMsg = PUSHUP_VOICE_MSG[liveKey];
           if (liveMsg) {
@@ -317,6 +321,7 @@ export class PushUpFlow {
     this._voice.resetCooldowns();
     this._rep  = new PushUpRepTracker();
     this._repAccum = createEmptyRepAccumulator();
+    this._mistakeGate.reset();
     this._phase        = PUSHUP_PHASE.WAITING_FOR_PERSON;
     this._readyStart   = -1;
     this._readyVoiceSent = false;

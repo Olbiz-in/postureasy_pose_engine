@@ -34,22 +34,24 @@ export function speedKeyToMessage(speedKey) {
 }
 
 /**
+ * Every per-rep warning that applies, highest priority first.
+ * @param {{ speedKey?: string|null, kneeMsg?: string|null, torsoMsg?: string|null, shoulderMsg?: string|null }} candidates
+ * @returns {{ key: string, text: string, kind: 'speed'|'knee'|'torso'|'shoulder' }[]}
+ */
+export function listRepPostureWarnings({ speedKey, kneeMsg, torsoMsg, shoulderMsg }) {
+  const out = [];
+  const speedMsg = speedKeyToMessage(speedKey);
+  if (speedMsg) out.push({ key: 'rep_speed', text: speedMsg, kind: 'speed' });
+  if (kneeMsg) out.push({ key: 'knee_posture', text: kneeMsg, kind: 'knee' });
+  if (torsoMsg) out.push({ key: 'torso_posture', text: torsoMsg, kind: 'torso' });
+  if (shoulderMsg) out.push({ key: 'shoulder_posture', text: shoulderMsg, kind: 'shoulder' });
+  return out;
+}
+
+/**
  * @param {{ speedKey?: string|null, kneeMsg?: string|null, torsoMsg?: string|null, shoulderMsg?: string|null }} candidates
  * @returns {{ key: string, text: string, kind: 'speed'|'knee'|'torso'|'shoulder' }|null}
  */
-export function selectRepPostureWarning({ speedKey, kneeMsg, torsoMsg, shoulderMsg }) {
-  const speedMsg = speedKeyToMessage(speedKey);
-  if (speedMsg) {
-    return { key: 'rep_speed', text: speedMsg, kind: 'speed' };
-  }
-  if (kneeMsg) {
-    return { key: 'knee_posture', text: kneeMsg, kind: 'knee' };
-  }
-  if (torsoMsg) {
-    return { key: 'torso_posture', text: torsoMsg, kind: 'torso' };
-  }
-  if (shoulderMsg) {
-    return { key: 'shoulder_posture', text: shoulderMsg, kind: 'shoulder' };
-  }
-  return null;
+export function selectRepPostureWarning(candidates) {
+  return listRepPostureWarnings(candidates)[0] || null;
 }

@@ -69,7 +69,7 @@ function createSideSquatTracker(options = {}) {
       if (vis && lastFr.stanceData) {
         const inSquat = lastFr.phase === SIDE_PHASE.EXERCISE_ACTIVE
           && lastFr.squatTracker?.inSquat;
-        drawSideSquatTorsoTolerance(ctx, vis, frame.width, frame.height, inSquat);
+        drawSideSquatTorsoTolerance(ctx, vis, frame.width, frame.height, inSquat && !!lastFr.leanMistakeShown);
       }
 
       if (lastFr.squatTracker && lastFr.phase === SIDE_PHASE.EXERCISE_ACTIVE && vis) {
@@ -84,7 +84,7 @@ function createSideSquatTracker(options = {}) {
           frame.width,
           frame.height,
         );
-        drawTempoGateOverlay(ctx, lastFr.squatTracker, frame.width, frame.height);
+        drawTempoGateOverlay(ctx, lastFr.squatTracker, frame.width, frame.height, !!lastFr.tempoMistakeShown);
       }
     },
   };
