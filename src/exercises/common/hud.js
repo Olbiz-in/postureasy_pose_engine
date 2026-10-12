@@ -11,6 +11,7 @@
 // setsCompleted, restRemainingSec, stanceResult, stanceHoldPct.
 
 import { nowSec } from '../../core/landmarks';
+import { ankleStance } from './frontStance';
 
 export const HUD_CYAN = 'rgb(0,200,255)';
 export const HUD_GREEN = 'rgb(0,255,80)';
@@ -84,32 +85,29 @@ export function measure(ctx, text, size, weight = 700) {
 
 // ── Stance check ────────────────────────────────────────────────────────────
 
-/** Min / max foot rails around the ankles. */
-export function drawStanceGuides(ctx, g, stance, h, { stanceMin, stanceMax, narrowKey, wideKey }) {
+/** Min / max rails per ankle; each ankle turns red when it is outside its own rails. */
+export function drawStanceGuides(ctx, g, stance, h, { stanceMin, stanceMax }) {
   if (!g?.feetOk) return;
   const cx = g.shMid.x;
   const halfMin = (stanceMin * g.sw) / 2;
   const halfMax = (stanceMax * g.sw) / 2;
   const halfLen = Math.max(8, 0.03 * h);
-  const keys = new Set(stance?.cueKeys || []);
-  const narrow = keys.has(narrowKey);
-  const wide = keys.has(wideKey);
-  const ok = !narrow && !wide;
+  const ankles = ankleStance(g, stanceMin, stanceMax);
 
   ctx.save();
-  for (const [d, ankle] of [[-1, g.la.x < g.ra.x ? g.la : g.ra], [1, g.la.x < g.ra.x ? g.ra : g.la]]) {
+  for (const [d, s] of [[-1, ankles.left], [1, ankles.right]]) {
+    const { ankle, status } = s;
     ctx.lineWidth = 2;
-    ctx.strokeStyle = narrow ? blink() : HUD_CYAN;
+    ctx.strokeStyle = status === 'narrow' ? blink() : HUD_CYAN;
     line(ctx, cx + d * halfMin, ankle.y - halfLen, cx + d * halfMin, ankle.y + halfLen);
-    ctx.strokeStyle = wide ? blink() : HUD_CYAN;
+    ctx.strokeStyle = status === 'wide' ? blink() : HUD_CYAN;
     line(ctx, cx + d * halfMax, ankle.y - halfLen, cx + d * halfMax, ankle.y + halfLen);
-    dot(ctx, ankle.x, ankle.y, 5, ok ? HUD_GREEN : HUD_RED);
+    dot(ctx, ankle.x, ankle.y, 5, status === 'ok' ? HUD_GREEN : HUD_RED);
   }
   ctx.restore();
 }
 
 const DEFAULT_STANCE_ROWS = [
-  ['Facing the camera', 'facing'],
   ['Standing upright', 'upright'],
   ['Feet shoulder width', 'feet'],
   ['Arms down at sides', 'armsDown'],

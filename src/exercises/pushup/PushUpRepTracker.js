@@ -55,15 +55,6 @@ function inBand(dx, alignMax, inner, outer) {
   return -(alignMax + inner) <= dx && dx <= alignMax + outer;
 }
 
-function nearBand(dx, alignMax, inner, outer) {
-  const lo = -(alignMax + inner);
-  const hi = alignMax + outer;
-  if (!(lo <= dx && dx <= hi)) return false;
-  const span = hi - lo;
-  const margin = span * (1.0 - PUSHUP_CFG.near_limit_fraction) * 0.5;
-  return dx <= lo + margin || dx >= hi - margin;
-}
-
 function sideDx(point, shoulder, sw) {
   return (point.x - shoulder.x) / sw;
 }
@@ -117,27 +108,6 @@ export function checkWristElbowCollinearity(landmarks, sw) {
   return { ok: lOk && rOk, near, lDev, rDev, cueKeys };
 }
 
-export function checkHandOrientation(landmarks, sw) {
-  if (sw == null) sw = pushupShoulderWidth(landmarks);
-  const lw = landmarks[LM.LEFT_WRIST];
-  const rw = landmarks[LM.RIGHT_WRIST];
-  const li = landmarks[LM.LEFT_INDEX];
-  const ri = landmarks[LM.RIGHT_INDEX];
-  const lRot = (li.x - lw.x) / sw;
-  const rRot = (ri.x - rw.x) / sw;
-  const lIn = PUSHUP_CFG.hand_rotation_ratio_max + PUSHUP_CFG.hand_left_inner_offset_ratio;
-  const rIn = PUSHUP_CFG.hand_rotation_ratio_max + PUSHUP_CFG.hand_right_inner_offset_ratio;
-  const lOk = inBand(lRot, PUSHUP_CFG.hand_rotation_ratio_max, PUSHUP_CFG.hand_left_inner_offset_ratio, PUSHUP_CFG.hand_left_outer_offset_ratio);
-  const rOk = inBand(rRot, PUSHUP_CFG.hand_rotation_ratio_max, PUSHUP_CFG.hand_right_inner_offset_ratio, PUSHUP_CFG.hand_right_outer_offset_ratio);
-  const cueKeys = [];
-  if (!lOk) cueKeys.push(lRot < -lIn ? 'hand_left_inner' : 'hand_left_outer');
-  if (!rOk) cueKeys.push(rRot < -rIn ? 'hand_right_outer' : 'hand_right_inner');
-  const near =
-    nearBand(lRot, PUSHUP_CFG.hand_rotation_ratio_max, PUSHUP_CFG.hand_left_inner_offset_ratio, PUSHUP_CFG.hand_left_outer_offset_ratio) ||
-    nearBand(rRot, PUSHUP_CFG.hand_rotation_ratio_max, PUSHUP_CFG.hand_right_inner_offset_ratio, PUSHUP_CFG.hand_right_outer_offset_ratio);
-  return { ok: lOk && rOk, near, lRot, rRot, cueKeys };
-}
-
 export function checkShoulderLineTooDeep(landmarks, pushupState) {
   if (pushupState !== 'DOWN') return { ok: true, near: false, cueKeys: [], shY: 0, lineY: 0 };
   const ls = landmarks[LM.LEFT_SHOULDER];
@@ -185,18 +155,14 @@ export function evaluatePushUpPosture(landmarks, elbowAngle, pushupState) {
   const wrist = checkWristAlignment(landmarks, sw);
   const elbow = checkElbowAlignment(landmarks, sw);
   const forearm = checkWristElbowCollinearity(landmarks, sw);
-  const hand = checkHandOrientation(landmarks, sw);
   const depth = checkPushUpDepth(elbowAngle, pushupState, landmarks);
 
-  const allCues = [...wrist.cueKeys, ...elbow.cueKeys, ...forearm.cueKeys, ...hand.cueKeys, ...depth.cueKeys];
+  const allCues = [...wrist.cueKeys, ...elbow.cueKeys, ...forearm.cueKeys, ...depth.cueKeys];
 
   let primaryMessage;
   let primaryColorKey;
   if (!depth.ok) {
     primaryMessage = 'TOO DEEP';
-    primaryColorKey = 'red';
-  } else if (!hand.ok) {
-    primaryMessage = 'HAND ROTATED';
     primaryColorKey = 'red';
   } else if (!wrist.ok || !elbow.ok || !forearm.ok) {
     primaryMessage = 'ELBOW MISALIGNED';
@@ -207,7 +173,7 @@ export function evaluatePushUpPosture(landmarks, elbowAngle, pushupState) {
   }
 
   const anyBad = allCues.length > 0;
-  const anyNear = wrist.near || forearm.near || hand.near || depth.near;
+  const anyNear = wrist.near || forearm.near || depth.near;
   const skeletonColorKey = anyBad ? 'red' : anyNear ? 'yellow' : 'green';
 
   return {
@@ -218,7 +184,6 @@ export function evaluatePushUpPosture(landmarks, elbowAngle, pushupState) {
     wristOk: wrist.ok,
     elbowOk: elbow.ok,
     forearmOk: forearm.ok,
-    handOk: hand.ok,
     depthOk: depth.ok,
   };
 }

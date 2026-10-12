@@ -9,7 +9,6 @@ export const PUSHUP_SCORE_WEIGHTS = {
   depth: 20,
   wrist: 15,
   forearm: 15,
-  hand: 10,
   symmetry: 10,
   tempo: 10,
 };
@@ -22,7 +21,7 @@ export function pushupIssueGroup(key) {
   if (key === 'pushup_uneven') return 'symmetry';
   if (key === 'pushup_rep_fast') return 'tempo';
   const prefix = key.split('_')[0];
-  return ['wrist', 'elbow', 'hand', 'forearm'].includes(prefix) ? prefix : null;
+  return ['wrist', 'elbow', 'forearm'].includes(prefix) ? prefix : null;
 }
 
 /** Per-rep accumulator fed every frame between leaving the top and the next lockout. */

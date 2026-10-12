@@ -7,6 +7,7 @@
 
 import { LM, jointAngle } from '../../core/landmarks';
 import { SP_CFG, SP_REQUIRED_UPPER, SP_REQUIRED_FEET } from './config';
+import { ankleStance } from '../common/frontStance';
 
 function vis(lm) {
   return lm ? (lm.visibility == null ? 1 : lm.visibility) : 0;
@@ -56,8 +57,6 @@ export function buildGeometry(landmarks, w, h) {
   const la = P(LM.LEFT_ANKLE);
   const ra = P(LM.RIGHT_ANKLE);
   const nose = P(LM.NOSE);
-  const lear = P(LM.LEFT_EAR);
-  const rear = P(LM.RIGHT_EAR);
 
   const sw = Math.max(Math.abs(ls.x - rs.x), 1);
   // +1 when the anatomical left shoulder has the larger x in the image.
@@ -72,7 +71,7 @@ export function buildGeometry(landmarks, w, h) {
   const minVis = SP_CFG.min_visibility;
   return {
     w, h, sw, outSign, torsoLen,
-    ls, rs, le, re, lw, rw, lh, rh, la, ra, nose, lear, rear,
+    ls, rs, le, re, lw, rw, lh, rh, la, ra, nose,
     shMid, hipMid,
     shY: shMid.y,
     leftAngle,
@@ -81,9 +80,8 @@ export function buildGeometry(landmarks, w, h) {
     leftArmLen: dist(ls, le) + dist(le, lw),
     rightArmLen: dist(rs, re) + dist(re, rw),
     feetOk: la.v >= minVis && ra.v >= minVis,
-    earsOk: (lear?.v ?? 0) >= minVis && (rear?.v ?? 0) >= minVis,
     noseOk: (nose?.v ?? 0) >= minVis,
-    // Hands above the top edge — the press will be cut off at lockout.
+    // Hands above the top edge — the press will be cut off at the top.
     handsClipped: lw.y < 0.01 * h || rw.y < 0.01 * h,
     // Shoulder width collapses when the user turns sideways.
     facingFront: sw / torsoLen >= 0.35,
@@ -106,25 +104,28 @@ function nearEdge(value, lo, hi) {
 
 export function checkStance(g, multiplier = 1) {
   if (!g.feetOk) return { ok: true, skipped: true, cueKeys: [], near: false };
-  const ratio = Math.abs(g.la.x - g.ra.x) / g.sw;
   const min = 1 - SP_CFG.stance_narrow_tolerance * multiplier;
   const max = 1 + SP_CFG.stance_wide_tolerance * multiplier;
   const feetDy = Math.abs(g.la.y - g.ra.y) / g.sw;
   const feetDyMax = SP_CFG.feet_level_ratio_max * multiplier;
 
+  // Each ankle must sit inside its own rails around the shoulder midline.
+  const ankles = ankleStance(g, min, max);
+  const { status, ratio } = ankles;
   const cueKeys = [];
-  let status = 'ok';
-  // Setup gate is width-only (feet under shoulders). Centering is never checked.
-  if (ratio < min) { status = 'narrow'; cueKeys.push('sp_stance_narrow'); }
-  else if (ratio > max) { status = 'wide'; cueKeys.push('sp_stance_wide'); }
+  if (status === 'narrow') cueKeys.push('sp_stance_narrow');
+  else if (status === 'wide') cueKeys.push('sp_stance_wide');
 
   return {
     ok: cueKeys.length === 0,
     status,
     ratio, min, max,
+    left: ankles.left,
+    right: ankles.right,
     feetDy, feetDyMax,
     cueKeys,
-    near: status === 'ok' && nearEdge(ratio, min, max),
+    near: status === 'ok'
+      && [ankles.left, ankles.right].some((s) => nearEdge(s.off, min / 2, max / 2)),
   };
 }
 
@@ -150,27 +151,6 @@ export function checkShoulderLevel(g) {
   const cueKeys = [];
   if (Math.abs(dy) > tol) cueKeys.push(dy < 0 ? 'sp_shoulder_high_left' : 'sp_shoulder_high_right');
   return { ok: cueKeys.length === 0, dy, tol, cueKeys };
-}
-
-/** Ear→shoulder vertical gap per side, as a ratio of shoulder width. */
-export function earShoulderGaps(g) {
-  if (!g.earsOk) return null;
-  return {
-    left: (g.ls.y - g.lear.y) / g.sw,
-    right: (g.rs.y - g.rear.y) / g.sw,
-  };
-}
-
-export function checkShrug(g, baseline) {
-  const min = SP_CFG.shrug_ratio_min;
-  if (!baseline || !(min > 0)) return { ok: true, skipped: true, cueKeys: [] };
-  const gaps = earShoulderGaps(g);
-  if (!gaps) return { ok: true, skipped: true, cueKeys: [] };
-  const lRatio = baseline.left > 0 ? gaps.left / baseline.left : 1;
-  const rRatio = baseline.right > 0 ? gaps.right / baseline.right : 1;
-  const ratio = Math.min(lRatio, rRatio);
-  const cueKeys = ratio < min ? ['sp_shrug'] : [];
-  return { ok: cueKeys.length === 0, ratio, min, cueKeys };
 }
 
 // ── Arm position / path ─────────────────────────────────────────────────────
@@ -297,8 +277,7 @@ export function pressLines(g, armLenRef) {
  * Live posture during reps. Feet / torso lean / shoulder level are locked in
  * setup and are intentionally NOT re-checked here (only press-path cues).
  */
-export function evaluatePressPosture(g, { baseline, zone, forearmSmooth = null }) {
-  const shrug = checkShrug(g, baseline);
+export function evaluatePressPosture(g, { zone, forearmSmooth = null }) {
   const symmetry = checkSymmetry(g);
   const forearm = zone === 'top' ? { ok: true, cueKeys: [], near: false } : checkForearms(g, forearmSmooth);
   const elbow = zone === 'bottom' ? checkElbowTuck(g) : { ok: true, cueKeys: [] };
@@ -309,18 +288,17 @@ export function evaluatePressPosture(g, { baseline, zone, forearmSmooth = null }
     ...forearm.cueKeys,
     ...elbow.cueKeys,
     ...top.cueKeys,
-    ...shrug.cueKeys,
   ];
   const near = !!(symmetry.near || forearm.near);
 
   return {
     cueKeys,
     skeletonColorKey: cueKeys.length ? 'red' : near ? 'yellow' : 'green',
-    shrug, symmetry, forearm, elbow, top,
+    symmetry, forearm, elbow, top,
   };
 }
 
-/** Feet phase: ankle width ≈ shoulder width only (no centering). */
+/** Feet phase: each ankle inside its rails around the shoulder midline. */
 export function evaluateFeet(g) {
   const stance = checkStance(g, 1);
   return {

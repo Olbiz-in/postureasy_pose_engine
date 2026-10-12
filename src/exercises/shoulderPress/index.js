@@ -45,7 +45,6 @@ function createShoulderPressTracker(options = {}) {
           score: done.score,
           heightPct: done.heightPct,
           romPct: clampPct((done.heightPct / (SP_CFG.top_height_ratio * 100)) * 100),
-          lockoutPct: clampPct((done.maxAngle / SP_CFG.lockout_angle_min) * 100),
           maxAngle: done.maxAngle,
           maxElbowDrop: done.maxElbowDrop,
           groups: done.groups,

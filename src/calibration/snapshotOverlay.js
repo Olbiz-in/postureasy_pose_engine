@@ -22,7 +22,7 @@ import { drawAllStanceToleranceGuides, drawHipCenterGuides } from '../exercises/
 
 import {
   pushupShoulderWidth, checkWristAlignment, checkElbowAlignment,
-  checkWristElbowCollinearity, checkHandOrientation,
+  checkWristElbowCollinearity,
 } from '../exercises/pushup/PushUpRepTracker';
 import { drawPushUpToleranceLines } from '../exercises/pushup/draw';
 
@@ -32,7 +32,6 @@ import {
   checkSymmetry as checkPressSymmetry,
 } from '../exercises/shoulderPress/poseChecks';
 import { drawAllToleranceGuides } from '../exercises/shoulderPress/draw';
-
 import { LR_CFG, LR_TRACKED_LANDMARKS } from '../exercises/lateralRaise/config';
 import {
   buildGeometry as buildLateralGeometry, evaluateStance as evaluateLateralStance,
@@ -51,8 +50,14 @@ import { DC_CFG, DC_TRACKED_LANDMARKS } from '../exercises/dumbbellCurl/config';
 import { buildCurlGeometry, evaluateCurlStance, curlLines } from '../exercises/dumbbellCurl/poseChecks';
 import { drawCurlLines } from '../exercises/dumbbellCurl/draw';
 
+import { SR_CFG, SR_TRACKED_LANDMARKS } from '../exercises/singleArmDumbbellRow/config';
+import {
+  buildRowGeometry, evaluateRowSetup, sideScores, viewConfidence,
+} from '../exercises/singleArmDumbbellRow/poseChecks';
+import { drawRowGuides } from '../exercises/singleArmDumbbellRow/draw';
+
 export const CALIBRATION_FAMILIES = [
-  'squat', 'pushup', 'shoulderpress', 'lateralraise', 'frontraise', 'dumbbellcurl',
+  'squat', 'pushup', 'shoulderpress', 'lateralraise', 'frontraise', 'dumbbellcurl', 'singlearmdumbbellrow',
 ];
 
 // ── Pose detection on a still image ─────────────────────────────────────────
@@ -140,7 +145,6 @@ function drawLevelBand(ctx, a, b, maxGapPx, pad) {
 function stanceChecks(st) {
   const c = st?.checks || {};
   return [
-    { label: 'Facing the camera', ok: !!c.facing },
     { label: 'Standing upright', ok: !!c.upright },
     { label: 'Feet width', ok: !!c.feet },
   ];
@@ -179,7 +183,6 @@ function drawPushUp(ctx, landmarks, { width: w, height: h }) {
     { label: 'Wrists in band', ok: checkWristAlignment(landmarks, sw).ok },
     { label: 'Elbows in band', ok: checkElbowAlignment(landmarks, sw).ok },
     { label: 'Forearms straight', ok: checkWristElbowCollinearity(landmarks, sw).ok },
-    { label: 'Hands facing forward', ok: checkHandOrientation(landmarks, sw).ok },
     elbowAngle != null && {
       label: `Elbow angle ${Math.round(elbowAngle)}° (bottom target ${band.min}–${band.max}°)`,
       ok: elbowAngle >= band.min && elbowAngle <= band.max,
@@ -194,11 +197,15 @@ function drawShoulderPress(ctx, landmarks, { width: w, height: h, mirrored }) {
   const armLenRef = Math.max(g.leftArmLen, g.rightArmLen);
   drawAllToleranceGuides(ctx, g, h, mirrored, { showStance: true, armLenRef });
   const stance = checkPressStance(g, 1);
+  const forearms = checkForearms(g);
+  const forearmsJudged = forearms.left.valid || forearms.right.valid;
   return [
     { label: 'Feet shoulder width', ok: stance.ok && !stance.skipped },
     { label: 'No side bend', ok: checkTorsoLean(g).ok },
     { label: 'Shoulders level', ok: checkPressShoulderLevel(g).ok },
-    { label: 'Wrists stacked over elbows', ok: checkForearms(g).ok },
+    forearmsJudged
+      ? { label: 'Wrists stacked over elbows', ok: forearms.ok }
+      : { label: 'Wrist tilt: raise the dumbbells above the elbows to check', ok: true, info: true },
     { label: 'Elbows out enough', ok: checkElbowTuck(g).ok },
     { label: 'Wrists not too wide', ok: checkTopWidth(g).ok },
     { label: 'Left/right even', ok: checkPressSymmetry(g).ok },
@@ -210,7 +217,7 @@ function drawRaise(ctx, landmarks, frame, spec) {
   const { cfg, tracked, build, stance, prefix, drawLine, lines, symmetryPoint } = spec;
   const g = build(pixelPoints(landmarks, tracked, cfg.min_visibility, w, h), null);
   if (!g) return null;
-  const st = stance(g, g.sw);
+  const st = stance(g);
   drawStanceGuides(ctx, g, st, h, {
     stanceMin: cfg.stance_min, stanceMax: cfg.stance_max,
     narrowKey: `${prefix}feet_narrow`, wideKey: `${prefix}feet_wide`,
@@ -242,8 +249,10 @@ function drawLateralRaise(ctx, landmarks, frame) {
     lines: lateralLines,
     symmetryPoint: (a) => a.elbow,
     extraChecks: (g, L, arms) => [
-      { label: 'Wrists under wrist limit', ok: arms.every((a) => a.wrist.y >= L.wristLimitY) },
-      { label: 'Elbows not above band', ok: arms.every((a) => a.elbow.y >= L.bandTopY) },
+      {
+        label: 'Elbows between upper & lower lines',
+        ok: arms.length > 0 && arms.every((a) => a.elbow.y >= L.bandTopY && a.elbow.y <= L.bandBottomY),
+      },
     ],
   });
 }
@@ -276,7 +285,7 @@ function drawDumbbellCurl(ctx, landmarks, { width: w, height: h, mirrored }) {
     restElbow: { left: DC_CFG.rest_elbow_default, right: DC_CFG.rest_elbow_default },
     restElbowOut: { left: g.left.elbowOut ?? 0, right: g.right.elbowOut ?? 0 },
   };
-  const st = evaluateCurlStance(g, g.sw);
+  const st = evaluateCurlStance(g);
   drawStanceGuides(ctx, g, st, h, {
     stanceMin: DC_CFG.stance_min, stanceMax: DC_CFG.stance_max,
     narrowKey: 'dc_feet_narrow', wideKey: 'dc_feet_wide',
@@ -296,6 +305,27 @@ function drawDumbbellCurl(ctx, landmarks, { width: w, height: h, mirrored }) {
   ];
 }
 
+function drawSingleArmDumbbellRow(ctx, landmarks, { width: w, height: h, mirrored }) {
+  const scores = sideScores(landmarks);
+  const side = scores.left >= scores.right ? 'left' : 'right';
+  const g = buildRowGeometry(pixelPoints(landmarks, SR_TRACKED_LANDMARKS, SR_CFG.min_visibility, w, h), side);
+  if (!g) return null;
+  // No live calibration on a photo: the hanging-arm start falls back to the config default.
+  const calib = { side, restDepth: SR_CFG.rest_depth_default, restBack: g.arm.back ?? 0 };
+  const st = evaluateRowSetup(g, viewConfidence(landmarks, side));
+  drawRowGuides(ctx, { geometry: g, calib, side, sustainedCues: [], armState: null }, mirrored, h);
+  return [
+    { label: `Side-on, ${side} arm visible`, ok: !!st.checks.view },
+    { label: 'Bent over, supported on the bench', ok: !!st.checks.bentOver },
+    { label: 'Arm hanging straight', ok: !!st.checks.armDown },
+    {
+      label: `Torso ${Math.round(g.elev)}° above horizontal (max ${SR_CFG.torso_angle_max_deg}°)`,
+      ok: g.elev <= SR_CFG.torso_angle_max_deg,
+      info: true,
+    },
+  ];
+}
+
 const DRAWERS = {
   squat: drawSquat,
   pushup: drawPushUp,
@@ -303,6 +333,7 @@ const DRAWERS = {
   lateralraise: drawLateralRaise,
   frontraise: drawFrontRaise,
   dumbbellcurl: drawDumbbellCurl,
+  singlearmdumbbellrow: drawSingleArmDumbbellRow,
 };
 
 /**

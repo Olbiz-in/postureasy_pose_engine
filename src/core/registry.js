@@ -77,6 +77,13 @@ export function resolveExerciseId(nameOrId, view) {
     } else if (/(shoulder|overhead)\s*press/.test(key)) baseId = _aliasIndex.get('shoulder press') || null;
     else if (/lateral\s*raise/.test(key)) baseId = _aliasIndex.get('lateral raise') || null;
     else if (/front\s*raise/.test(key) && !/alternat|seated|plate|barbell|cable/.test(key)) baseId = _aliasIndex.get('front raise') || null;
+    else if (/\b(single|one|1)[\s-]*arm\b.*\brows?\b/.test(key) && !/cable|barbell|machine|landmine|band|seated|upright|t-bar|inverted/.test(key)) {
+      baseId = _aliasIndex.get('single arm dumbbell row') || null;
+    }
+    else if (/\blunges?\b/.test(key) && !/walking|jump|lateral|side|curtsy|cossack|bulgarian|overhead|barbell|smith|machine/.test(key)) {
+      // Stationary lunge variants only; walking / jumping / lateral lunges move the body through the frame.
+      baseId = _aliasIndex.get('lunge') || null;
+    }
     else if (key.includes('squat')) baseId = _aliasIndex.get('squat') || 'squat';
     else if (key.includes('push')) baseId = _aliasIndex.get('pushup') || 'pushup';
     else if (/(dumbbell|bicep|biceps|hammer)\s*curl/.test(key) && !/concentration|preacher|cable|barbell|spider|incline/.test(key)) {

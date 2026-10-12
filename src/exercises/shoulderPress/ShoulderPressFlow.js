@@ -1,7 +1,7 @@
 // Standing dumbbell shoulder press (front view) — coaching state machine.
 //
 // Phases:
-//   WAITING_FOR_PERSON — waiting for a front-facing, full-body person
+//   WAITING_FOR_PERSON — waiting for a full-body person
 //   FEET_CHECK         — feet under shoulders (width only; no centering)
 //   SHOULDER_CHECK     — clear side bend / shoulder drop (light bend allowed)
 //   GET_READY          — wait for the dumbbells to be held at shoulder height
@@ -20,7 +20,7 @@ import {
 } from './config.js';
 import {
   buildGeometry, evaluateFeet, evaluateShoulderSetup, evaluatePressPosture,
-  earShoulderGaps, armZone, isRacked,
+  armZone, isRacked,
 } from './poseChecks.js';
 import { ShoulderPressRepTracker, selectPrimaryError } from './ShoulderPressRepTracker.js';
 import { RepeatMistakeGate } from '../common/repeatMistakeGate.js';
@@ -47,7 +47,6 @@ const INSTRUCTION_MIN_WAIT_SEC = 2.5;
 const RACK_HOLD_SEC = 0.6;
 const READY_DELAY_SEC = 2.0; // squat/pushup-style settle before "Do rep one"
 const PERSON_LOST_SEC = 0.6;
-const BASELINE_MAX_SAMPLES = 30;
 const DO_REP_ONE_MSG = 'Do rep one.';
 
 const FEET_PRIORITY = ['sp_stance_narrow', 'sp_stance_wide'];
@@ -60,12 +59,6 @@ function firstByPriority(keys, priority) {
   const set = new Set(keys);
   for (const k of priority) if (set.has(k)) return k;
   return keys[0] || null;
-}
-
-function median(values) {
-  if (!values.length) return 0;
-  const s = [...values].sort((a, b) => a - b);
-  return s[Math.floor(s.length / 2)];
 }
 
 function _baseResult(phase, overrides = {}) {
@@ -111,8 +104,6 @@ export class ShoulderPressFlow {
     this._rackSince = -1;
     this._readyStart = -1;
     this._doRepOneVoiceSent = false;
-    this._baselineSamples = { left: [], right: [] };
-    this._baseline = null;
     this._cueOnset = new Map();
     this._mistakeGate = new RepeatMistakeGate();
     this._lastLiveCueAt = -1;
@@ -272,13 +263,6 @@ export class ShoulderPressFlow {
         ...common, status: 'No person detected', statusKind: 'fail',
       });
     }
-    if (!g.facingFront) {
-      this._speak('Please face the camera directly.', { key: 'sp_face_camera', cooldownMs: VOICE_CD_MS });
-      return _baseResult(SP_PHASE.WAITING_FOR_PERSON, {
-        ...common, poseDetected: true, geometry: g,
-        status: 'Face the camera', statusKind: 'warn',
-      });
-    }
     if (!g.feetOk) {
       this._speak(SP_VOICE_MSG.feet_not_visible, { key: 'sp_feet_not_visible', cooldownMs: VOICE_CD_MS });
       return _baseResult(SP_PHASE.WAITING_FOR_PERSON, {
@@ -361,7 +345,6 @@ export class ShoulderPressFlow {
     }
 
     const sh = evaluateShoulderSetup(g);
-    const gaps = earShoulderGaps(g);
 
     if (!sh.ok) {
       this._setupPassSince = -1;
@@ -376,19 +359,9 @@ export class ShoulderPressFlow {
     }
 
     this._maybeIssueInstruction(null, '', now);
-    if (gaps) {
-      const s = this._baselineSamples;
-      s.left.push(gaps.left);
-      s.right.push(gaps.right);
-      if (s.left.length > BASELINE_MAX_SAMPLES) { s.left.shift(); s.right.shift(); }
-    }
     if (this._setupPassSince < 0) this._setupPassSince = now;
 
     if (this._setupReady(now)) {
-      const s = this._baselineSamples;
-      this._baseline = s.left.length >= 5
-        ? { left: median(s.left), right: median(s.right) }
-        : null;
       this._shouldersLocked = true;
       this._phase = SP_PHASE.GET_READY;
       this._rackSince = -1;
@@ -504,7 +477,7 @@ export class ShoulderPressFlow {
 
     const zone = armZone(g);
     const inPress = rep.state !== 'WAITING';
-    const posture = inPress ? evaluatePressPosture(g, { baseline: this._baseline, zone }) : null;
+    const posture = inPress ? evaluatePressPosture(g, { zone }) : null;
     const prevCount = rep.count;
     const res = rep.update(g, now, posture?.cueKeys || []);
     this._mistakeGate.track(rep.state !== 'WAITING');

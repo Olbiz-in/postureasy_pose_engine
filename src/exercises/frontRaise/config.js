@@ -49,9 +49,6 @@ export const FR_CFG_DEFAULTS = {
   torso_height_min: 0.9, // (hip y − shoulder y) / sw; smaller = bent over
   arms_down_hip_margin: 0.25, // wrist may sit this far (/ sw) above the hip line
   arms_down_below_shoulder_min: 0.9, // …or at least this far below the shoulder line
-  facing_min_ratio: 0.85, // live sw / max sw seen during setup
-  facing_sw_torso_min: 0.45, // sw / shoulder-to-hip distance (absolute sideways guard)
-
   // ── Shoulder line / rep detection ────────────────────────────────────────
   line_mode: 'average', // 'average' (one line, both shoulders) | 'per_side'
   // TOP ("hands at shoulder height"): wrist at most this far BELOW the line.
@@ -145,7 +142,6 @@ export const FR_ISSUE_PRIORITY = [
 export const FR_STANCE_PRIORITY = [
   'fr_no_person',
   'fr_feet_not_visible',
-  'fr_facing',
   'fr_not_upright',
   'fr_feet_narrow',
   'fr_feet_wide',
@@ -155,7 +151,6 @@ export const FR_STANCE_PRIORITY = [
 export const FR_FEEDBACK = {
   fr_no_person: 'Stand in front of the camera',
   fr_feet_not_visible: 'Step back — feet not visible',
-  fr_facing: 'Face the camera directly',
   fr_not_upright: 'Stand up straight',
   fr_feet_narrow: 'Move your feet apart to shoulder width',
   fr_feet_wide: 'Feet too wide — bring them in to shoulder width',
@@ -181,7 +176,6 @@ export const FR_VOICE_MSG = {
   setup_begin: 'Stand facing the camera with your feet shoulder width apart and your arms down in front of your thighs.',
   fr_no_person: 'Please stand in front of the camera.',
   fr_feet_not_visible: 'Step back so your full body, including your feet, is visible.',
-  fr_facing: 'Please turn and face the camera.',
   fr_not_upright: 'Stand up straight.',
   fr_feet_narrow: 'Move your feet apart to shoulder width.',
   fr_feet_wide: 'Your feet are too wide. Bring them in to shoulder width.',

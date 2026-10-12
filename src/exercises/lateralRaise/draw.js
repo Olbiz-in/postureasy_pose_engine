@@ -9,7 +9,7 @@ import { raiseLines } from './poseChecks';
 import { LR_PHASE } from './LateralRaiseFlow';
 import {
   HUD_CYAN as CYAN, HUD_GREEN as GREEN, HUD_RED as RED, HUD_AMBER as AMBER,
-  HUD_GREY as GREY, HUD_WHITE as WHITE,
+  HUD_WHITE as WHITE,
   blink, line, dot, label,
   drawStanceGuides, drawStanceChecklist, drawActivityBadge, drawCounters,
   drawFeedback, drawRestOverlay, drawDebugRows,
@@ -30,13 +30,14 @@ const WARN_REASONS = ['lr_turned_away', 'lr_out_of_frame'];
 
 export function drawShoulderLine(ctx, g, calib, mirrored, h) {
   if (!g) return;
-  const L = raiseLines(g, calib);
+  const L = raiseLines(g);
   const n = g.norm;
   const xs = [g.ls.x, g.rs.x];
   for (const a of [g.left, g.right]) if (a.ok) xs.push(a.elbow.x, a.wrist.x);
   const x0 = Math.min(...xs) - 0.4 * n;
   const x1 = Math.max(...xs) + 0.4 * n;
   const labelX = mirrored ? x1 : x0;
+  const bandLabelX = mirrored ? x0 : x1;
   const size = Math.max(10, Math.round(h * 0.02));
 
   const inBand = (y) => y >= L.bandTopY && y <= L.bandBottomY;
@@ -46,13 +47,18 @@ export function drawShoulderLine(ctx, g, calib, mirrored, h) {
 
   ctx.save();
 
-  // Tolerance band (elbows should land here at the top).
+  // Upper / lower offset lines — elbows must land between them at the top.
+  const elbowOver = elbows.some((e) => e.y < L.bandTopY);
   ctx.fillStyle = inCount === 2 ? 'rgba(0,255,80,0.16)' : 'rgba(0,200,255,0.10)';
   ctx.fillRect(x0, L.bandTopY, x1 - x0, L.bandBottomY - L.bandTopY);
-  ctx.lineWidth = 1;
-  ctx.strokeStyle = 'rgba(0,200,255,0.7)';
+  ctx.lineWidth = 2;
+  ctx.strokeStyle = elbowOver ? blink() : 'rgba(0,200,255,0.85)';
   line(ctx, x0, L.bandTopY, x1, L.bandTopY);
+  ctx.strokeStyle = 'rgba(0,200,255,0.85)';
   line(ctx, x0, L.bandBottomY, x1, L.bandBottomY);
+  const bandLabel = { size: size - 1, align: 'right' };
+  label(ctx, 'UPPER', bandLabelX, L.bandTopY - 4, mirrored, elbowOver ? RED : CYAN, bandLabel);
+  label(ctx, 'LOWER', bandLabelX, L.bandBottomY + size, mirrored, CYAN, bandLabel);
 
   // The shoulder line itself.
   ctx.lineWidth = 3;
@@ -60,29 +66,12 @@ export function drawShoulderLine(ctx, g, calib, mirrored, h) {
   line(ctx, x0, L.shoulderY, x1, L.shoulderY);
   label(ctx, 'SHOULDER LINE', labelX, L.shoulderY - 6, mirrored, lineColor, { size });
 
-  // Wrists must stay under this line.
-  const wristOver = [g.left, g.right].some((a) => a.ok && a.wrist.y < L.wristLimitY);
-  ctx.lineWidth = 1.5;
-  ctx.setLineDash([6, 5]);
-  ctx.strokeStyle = wristOver ? blink() : 'rgba(255,90,90,0.8)';
-  line(ctx, x0, L.wristLimitY, x1, L.wristLimitY);
-  ctx.setLineDash([]);
-  label(ctx, 'WRIST LIMIT', labelX, L.wristLimitY - 4, mirrored, 'rgba(255,120,120,0.95)', { size: size - 1 });
-
-  // Start zone (arms must come back below this for the rep to finish).
-  ctx.setLineDash([3, 6]);
-  ctx.strokeStyle = GREY;
-  ctx.lineWidth = 1;
-  line(ctx, x0, L.returnY, x1, L.returnY);
-  ctx.setLineDash([]);
-  label(ctx, 'START ZONE', labelX, L.returnY + size + 2, mirrored, GREY, { size: size - 1 });
-
   for (const a of [g.left, g.right]) {
     if (!a.ok) continue;
     const e = a.elbow;
     const eColor = e.y < L.bandTopY ? RED : inBand(e.y) ? GREEN : CYAN;
     dot(ctx, e.x, e.y, 6, eColor);
-    dot(ctx, a.wrist.x, a.wrist.y, 5, a.wrist.y < L.wristLimitY ? RED : WHITE);
+    dot(ctx, a.wrist.x, a.wrist.y, 5, WHITE);
   }
   ctx.restore();
 }
@@ -95,7 +84,7 @@ export function drawDebugReadout(ctx, fr, w, h, mirrored) {
     `shoulderY ${g ? g.shY.toFixed(0) : '—'}px  norm ${g ? g.norm.toFixed(0) : '—'}px`,
     `L elbowDy ${f(g?.left.elbowDy)} wristDy ${f(g?.left.wristDy)} ${fr.armStates.left}`,
     `R elbowDy ${f(g?.right.elbowDy)} wristDy ${f(g?.right.wristDy)} ${fr.armStates.right}`,
-    `top ≤ ${LR_CFG.top_tolerance}  wrist ≥ −${LR_CFG.wrist_above_tolerance}  elbow ≥ −${LR_CFG.elbow_above_tolerance}`,
+    `band −${LR_CFG.elbow_above_tolerance}…+${LR_CFG.top_tolerance}`,
   ];
   if (fr.calib) {
     const c = fr.calib;

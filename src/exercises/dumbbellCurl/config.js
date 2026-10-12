@@ -60,9 +60,6 @@ export const DC_CFG_DEFAULTS = {
   // Wrists must hang at hip level: at most this far (/ sw) above the hip line.
   arms_down_hip_margin: 0.10,
   arms_down_below_shoulder_min: null, // no alternative rule (arms must be fully down)
-  facing_min_ratio: 0.85, // live sw / max sw seen during setup
-  facing_sw_torso_min: 0.45, // sw / shoulder-to-hip distance (absolute sideways guard)
-
   // ── Reference lines / rep detection ──────────────────────────────────────
   line_mode: 'per_side', // 'per_side' (each arm vs its own shoulder) | 'average'
   top_line_offset: 0.10, // × T below the shoulder: TOP TARGET LINE
@@ -182,7 +179,6 @@ export const DC_LIVE_PRIORITY = [
 export const DC_STANCE_PRIORITY = [
   'dc_no_person',
   'dc_feet_not_visible',
-  'dc_facing',
   'dc_not_upright',
   'dc_feet_narrow',
   'dc_feet_wide',
@@ -193,7 +189,6 @@ export const DC_STANCE_PRIORITY = [
 export const DC_FEEDBACK = {
   dc_no_person: 'Stand in front of the camera',
   dc_feet_not_visible: 'Step back — feet not visible',
-  dc_facing: 'Face the camera directly',
   dc_not_upright: 'Stand up straight',
   dc_feet_narrow: 'Move your feet apart to shoulder width',
   dc_feet_wide: 'Feet too wide — bring them in to shoulder width',

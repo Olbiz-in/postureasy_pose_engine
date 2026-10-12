@@ -27,7 +27,6 @@ const REASON_LABEL = {
 const WARN_REASONS = ['dc_turned_away', 'dc_out_of_frame'];
 
 const STANCE_ROWS = [
-  ['Facing the camera', 'facing'],
   ['Standing upright', 'upright'],
   ['Feet shoulder width', 'feet'],
   ['Arms hanging at sides', 'armsDown'],

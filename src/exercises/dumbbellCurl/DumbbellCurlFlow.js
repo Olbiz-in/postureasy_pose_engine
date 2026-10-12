@@ -2,7 +2,7 @@
 //
 // Phases:
 //   SETUP_STANCE       — upright, feet ≈ shoulder width, arms hanging down,
-//                        facing the camera, held ~1 s → calibration (shoulder
+//                        held ~1 s → calibration (shoulder
 //                        width, torso length, resting wrist / elbow height,
 //                        REST_SPAN per arm, resting elbow–hip offset, tilt)
 //   READY              — short settle, then rep counting starts
@@ -47,7 +47,6 @@ const LIVE_CUE_SUSTAIN_SEC = 0.3;
 const LIVE_MISTAKE_HOLD_SEC = 1.5;
 const REP_MISTAKE_HOLD_SEC = 3.0;
 const FEEDBACK_HOLD_SEC = 2.5;
-const MAX_SW_DECAY = 0.998;
 const CALIB_MAX_SAMPLES = 60;
 
 export class DumbbellCurlFlow {
@@ -66,7 +65,6 @@ export class DumbbellCurlFlow {
     this._phase = DC_PHASE.SETUP_STANCE;
     this._smoother.reset();
     this._calib = null;
-    this._maxSw = 0;
     this._stancePassSince = -1;
     this._calibSamples = [];
 
@@ -296,8 +294,7 @@ export class DumbbellCurlFlow {
       });
     }
 
-    this._maxSw = Math.max(g.sw, this._maxSw * MAX_SW_DECAY);
-    const st = evaluateCurlStance(g, this._maxSw);
+    const st = evaluateCurlStance(g);
 
     if (!st.ok) {
       this._stancePassSince = -1;
@@ -556,7 +553,7 @@ export class DumbbellCurlFlow {
     }
 
     let inStance = false;
-    if (g && this._calib) inStance = evaluateCurlStance(g, g.norm).ok;
+    if (g && this._calib) inStance = evaluateCurlStance(g).ok;
     if (inStance) {
       if (this._restResumeSince < 0) this._restResumeSince = now;
     } else {

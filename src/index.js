@@ -36,12 +36,14 @@ export {
   LATERAL_RAISE_TOLERANCE_GROUPS,
   FRONT_RAISE_TOLERANCE_GROUPS,
   DUMBBELL_CURL_TOLERANCE_GROUPS,
+  SINGLE_ARM_DUMBBELL_ROW_TOLERANCE_GROUPS,
   getSquatToleranceConfig,
   getPushUpToleranceConfig,
   getShoulderPressToleranceConfig,
   getLateralRaiseToleranceConfig,
   getFrontRaiseToleranceConfig,
   getDumbbellCurlToleranceConfig,
+  getSingleArmDumbbellRowToleranceConfig,
 } from './exercises/toleranceDefinitions.js';
 
 export {
@@ -87,3 +89,23 @@ export {
 } from './exercises/dumbbellCurl/config.js';
 export { DC_PHASE, DC_ACTIVITY } from './exercises/dumbbellCurl/DumbbellCurlFlow.js';
 export { summarizeDumbbellCurl } from './exercises/dumbbellCurl/DumbbellCurlRepTracker.js';
+
+export {
+  LUNGE_CFG,
+  LUNGE_CFG_DEFAULTS,
+  LUNGE_SCORE_WEIGHTS,
+  resetLungeCfg,
+} from './exercises/lunge/config.js';
+export { LUNGE_PHASE } from './exercises/lunge/LungeFlow.js';
+
+export {
+  SR_CFG,
+  SR_CFG_DEFAULTS,
+  SR_SCORE_WEIGHTS,
+  SR_SCORE_WEIGHTS_DEFAULTS,
+  resetSingleArmDumbbellRowCfg,
+  resetSingleArmDumbbellRowWeights,
+  setSingleArmDumbbellRowDebug,
+} from './exercises/singleArmDumbbellRow/config.js';
+export { SR_PHASE, SR_ACTIVITY } from './exercises/singleArmDumbbellRow/SingleArmDumbbellRowFlow.js';
+export { summarizeSingleArmDumbbellRow } from './exercises/singleArmDumbbellRow/SingleArmDumbbellRowRepTracker.js';

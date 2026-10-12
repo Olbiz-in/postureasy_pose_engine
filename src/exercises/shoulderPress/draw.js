@@ -75,24 +75,23 @@ export function drawStanceGuides(ctx, g, stance, h) {
   const cx = g.shMid.x;
   const halfMin = (st.min * g.sw) / 2;
   const halfMax = (st.max * g.sw) / 2;
-  const narrow = st.status === 'narrow';
-  const wide = st.status === 'wide';
+  const sides = st.left && st.right ? st : checkStance(g, 1);
 
   ctx.save();
-  for (const side of ['left', 'right']) {
-    const d = dir(g, side);
-    const ankle = side === 'left' ? g.la : g.ra;
+  for (const [d, s] of [[-1, sides.left], [1, sides.right]]) {
+    const { ankle, status } = s;
+    const ok = status === 'ok';
     const y0 = ankle.y - halfLen;
     const y1 = ankle.y + halfLen;
     ctx.lineWidth = 2;
-    ctx.strokeStyle = narrow ? blink() : CYAN;
+    ctx.strokeStyle = status === 'narrow' ? blink() : CYAN;
     line(ctx, cx + d * halfMin, y0, cx + d * halfMin, y1);
-    ctx.strokeStyle = wide ? blink() : CYAN;
+    ctx.strokeStyle = status === 'wide' ? blink() : CYAN;
     line(ctx, cx + d * halfMax, y0, cx + d * halfMax, y1);
     ctx.lineWidth = 1;
-    ctx.strokeStyle = st.ok ? GREEN : RED;
+    ctx.strokeStyle = ok ? GREEN : RED;
     line(ctx, cx + (d * g.sw) / 2, y0, cx + (d * g.sw) / 2, y1);
-    dot(ctx, ankle.x, ankle.y, 4, st.ok ? GREEN : RED);
+    dot(ctx, ankle.x, ankle.y, 6, ok ? GREEN : RED);
   }
   ctx.restore();
 }
@@ -179,41 +178,44 @@ export function drawTorsoGuide(ctx, g, torso, shoulder, h) {
 
 // ── Wrist stack over elbow (forearm rails) ──────────────────────────────────
 
-function drawForearmRails(ctx, g, side, band, h) {
+/**
+ * Angled rails from the elbow at the inward / outward tilt limits (degrees
+ * from vertical). The wrist must stay between them. When the forearm is not
+ * pointing up enough to judge (`band.valid` false) the wrist dot is grey.
+ */
+function drawForearmRails(ctx, g, side, band) {
   if (!band) return;
   const d = dir(g, side);
   const elbow = side === 'left' ? g.le : g.re;
   const wrist = side === 'left' ? g.lw : g.rw;
-  const halfLen = halfLenPx(h);
-  const xLo = elbow.x + d * band.lo * g.sw;
-  const xHi = elbow.x + d * band.hi * g.sw;
-  const xIdeal = elbow.x; // stacked = wrist x ≈ elbow x in outward frame (dx≈0)
-  const y0 = wrist.y - halfLen;
-  const y1 = wrist.y + halfLen;
-  const inCross = band.dx < band.lo;
-  const outCross = band.dx > band.hi;
+  const len = Math.max(Math.hypot(wrist.x - elbow.x, wrist.y - elbow.y), 0.6 * g.sw);
+  const rail = (deg) => {
+    const r = (deg * Math.PI) / 180;
+    return { x: elbow.x + d * Math.sin(r) * len, y: elbow.y - Math.cos(r) * len };
+  };
+  const lo = rail(band.lo);
+  const hi = rail(band.hi);
+  const inCross = band.valid && band.tilt < band.lo;
+  const outCross = band.valid && band.tilt > band.hi;
 
   ctx.lineWidth = 2;
   ctx.strokeStyle = inCross ? blink() : CYAN;
-  line(ctx, xLo, y0, xLo, y1);
+  line(ctx, elbow.x, elbow.y, lo.x, lo.y);
   ctx.strokeStyle = outCross ? blink() : CYAN;
-  line(ctx, xHi, y0, xHi, y1);
+  line(ctx, elbow.x, elbow.y, hi.x, hi.y);
 
-  // Ideal center rail (wrist stacked above elbow)
-  ctx.lineWidth = 1;
-  ctx.strokeStyle = band.ok ? GREEN : RED;
-  line(ctx, xIdeal, y0, xIdeal, y1);
-
+  // Ideal: wrist straight above the elbow
   ctx.lineWidth = 1;
   ctx.setLineDash([4, 4]);
-  ctx.strokeStyle = GREY;
-  line(ctx, elbow.x, elbow.y, elbow.x, wrist.y);
+  ctx.strokeStyle = band.ok ? GREEN : RED;
+  line(ctx, elbow.x, elbow.y, elbow.x, elbow.y - len);
   ctx.setLineDash([]);
 
+  const color = !band.valid ? GREY : band.ok ? GREEN : RED;
   ctx.lineWidth = 2;
-  ctx.strokeStyle = band.ok ? 'rgb(120,180,230)' : RED;
-  line(ctx, elbow.x, wrist.y, wrist.x, wrist.y);
-  dot(ctx, wrist.x, wrist.y, 5, band.ok ? GREEN : RED);
+  ctx.strokeStyle = !band.valid ? GREY : band.ok ? 'rgb(120,180,230)' : RED;
+  line(ctx, elbow.x, elbow.y, wrist.x, wrist.y);
+  dot(ctx, wrist.x, wrist.y, 5, color);
   dot(ctx, elbow.x, elbow.y, 4, CYAN);
 }
 
@@ -221,8 +223,8 @@ export function drawWristStackGuides(ctx, g, forearm, h) {
   const f = forearm?.left ? forearm : checkForearms(g);
   if (!f?.left) return;
   ctx.save();
-  drawForearmRails(ctx, g, 'left', f.left, h);
-  drawForearmRails(ctx, g, 'right', f.right, h);
+  drawForearmRails(ctx, g, 'left', f.left);
+  drawForearmRails(ctx, g, 'right', f.right);
   ctx.restore();
 }
 

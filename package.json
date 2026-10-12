@@ -15,7 +15,8 @@
     "src"
   ],
   "scripts": {
-    "lint": "eslint src"
+    "lint": "eslint src",
+    "test": "node --import ./test/support/register.mjs --test test/*.test.js"
   },
   "dependencies": {
     "@mediapipe/tasks-vision": "^0.10.22"

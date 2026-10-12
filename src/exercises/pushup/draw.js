@@ -75,18 +75,14 @@ export function drawPushUpToleranceLines(ctx, landmarks, w, h) {
   const re = landmarks[LM.RIGHT_ELBOW];
   const lw = landmarks[LM.LEFT_WRIST];
   const rw = landmarks[LM.RIGHT_WRIST];
-  const li = landmarks[LM.LEFT_INDEX];
-  const ri = landmarks[LM.RIGHT_INDEX];
-  if (
-    Math.min(ls.visibility, rs.visibility, le.visibility, re.visibility, lw.visibility, rw.visibility, li.visibility, ri.visibility) < 0.2
-  ) {
+  if (Math.min(ls.visibility, rs.visibility, le.visibility, re.visibility, lw.visibility, rw.visibility) < 0.2) {
     return;
   }
 
   const sw = pushupShoulderWidth(landmarks);
   const wrist = checkWristAlignment(landmarks, sw);
-  drawArmTolSide(ctx, ls, lw, li, sw, wrist.lDx, wrist.bands.left, wrist.bands.left.ok, 'rgb(0,255,0)', 'rgb(120,180,230)', w, h);
-  drawArmTolSide(ctx, rs, rw, ri, sw, wrist.rDx, wrist.bands.right, wrist.bands.right.ok, 'rgb(0,255,0)', 'rgb(120,180,230)', w, h);
+  drawArmTolSide(ctx, ls, lw, null, sw, wrist.lDx, wrist.bands.left, wrist.bands.left.ok, 'rgb(0,255,0)', 'rgb(120,180,230)', w, h);
+  drawArmTolSide(ctx, rs, rw, null, sw, wrist.rDx, wrist.bands.right, wrist.bands.right.ok, 'rgb(0,255,0)', 'rgb(120,180,230)', w, h);
 
   const elbow = checkElbowAlignment(landmarks, sw);
   drawArmTolSide(ctx, ls, le, lw, sw, elbow.lDx, elbow.bands.left, elbow.bands.left.ok, 'rgb(100,255,200)', 'rgb(180,170,220)', w, h);

@@ -13,11 +13,6 @@ export const PUSHUP_POSTURE_PRIORITY_GROUPS = [
     keys: ['elbow_left_inner', 'elbow_left_outer', 'elbow_right_inner', 'elbow_right_outer'],
   },
   {
-    group: 'hand',
-    label: 'Hand rotation',
-    keys: ['hand_left_inner', 'hand_left_outer', 'hand_right_inner', 'hand_right_outer'],
-  },
-  {
     group: 'forearm',
     label: 'Forearm misalignment',
     keys: ['forearm_left', 'forearm_right'],

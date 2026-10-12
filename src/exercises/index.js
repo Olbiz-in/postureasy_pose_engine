@@ -10,7 +10,9 @@ import shoulderPress from './shoulderPress/index.js';
 import lateralRaise from './lateralRaise/index.js';
 import frontRaise from './frontRaise/index.js';
 import dumbbellCurl from './dumbbellCurl/index.js';
+import singleArmDumbbellRow from './singleArmDumbbellRow/index.js';
 import plankSide from './plankSide/index.js';
+import { lungeFront as lunge, lungeSide } from './lunge/index.js';
 
 registerExercise(squat);
 registerExercise(squatSide);
@@ -20,6 +22,12 @@ registerExercise(shoulderPress);
 registerExercise(lateralRaise);
 registerExercise(frontRaise);
 registerExercise(dumbbellCurl);
+registerExercise(singleArmDumbbellRow);
 registerExercise(plankSide);
+registerExercise(lunge);
+registerExercise(lungeSide);
 
-export { squat, squatSide, pushup, pushupSide, shoulderPress, lateralRaise, frontRaise, dumbbellCurl, plankSide };
+export {
+  squat, squatSide, pushup, pushupSide, shoulderPress, lateralRaise, frontRaise, dumbbellCurl,
+  singleArmDumbbellRow, plankSide, lunge, lungeSide,
+};

@@ -52,13 +52,13 @@ export const LR_CFG_DEFAULTS = {
   torso_height_min: 0.9, // (hip y − shoulder y) / sw; smaller = bent over
   arms_down_hip_margin: 0.25, // wrist may sit this far (/ sw) above the hip line
   arms_down_below_shoulder_min: 0.9, // …or at least this far below the shoulder line
-  facing_min_ratio: 0.85, // live sw / max sw seen during setup
-  facing_sw_torso_min: 0.45, // sw / shoulder-to-hip distance (absolute sideways guard)
-
   // ── Shoulder line / rep detection ────────────────────────────────────────
   line_mode: 'average', // 'average' (one line, both shoulders) | 'per_side'
-  // TOP ("touched the line"): elbow at most this far BELOW the shoulder line.
-  top_tolerance: 0.10,
+  // Target band around the shoulder line: a perfect rep puts the elbow
+  // between the LOWER line (reached the top) and the UPPER line (not too high).
+  top_tolerance: 0.10, // LOWER line: this far BELOW the shoulder line
+  elbow_above_tolerance: 0.12, // UPPER line: this far ABOVE the shoulder line
+  // Fixed rep-cycle internals (not user tunable).
   // Lift fraction: 0 = calibrated resting elbow height, 1 = elbow on the line.
   // Elbow height follows 1 − cos(arm raise), so 0.25 ≈ 40°, 0.35 ≈ 50°.
   lift_start: 0.25, // arm has left the start zone (rep begins) — every cycle past this counts as a rep
@@ -70,18 +70,13 @@ export const LR_CFG_DEFAULTS = {
   rest_wrist_default: 1.7,
 
   // ── Form rules ───────────────────────────────────────────────────────────
-  wrist_above_tolerance: 0.05, // wrist above the line by more than this → flag
-  elbow_above_tolerance: 0.12, // elbow above the line by more than this → flag
   flag_min_sec: 0.12, // a fault must persist this long inside a rep to count
   shoulder_tilt_max: 0.10, // |Δ shoulder y| / sw vs calibrated baseline
-  body_sway_max: 0.15, // shoulder-center x drift / sw during a rep
   symmetry_max: 0.15, // |left − right peak elbow height| / sw
 
   // Where each component score reaches 0 (linear ramp from its tolerance).
-  wrist_above_zero_at: 0.30,
   elbow_above_zero_at: 0.40,
   shoulder_tilt_zero_at: 0.30,
-  body_sway_zero_at: 0.45,
   symmetry_zero_at: 0.40,
   clean_score_min: 75,
 
@@ -117,7 +112,6 @@ export function setLateralRaiseDebug(on) {
 // Weights of the per-rep form score (normalized, so they need not sum to 100).
 export const LR_SCORE_WEIGHTS_DEFAULTS = {
   rom: 30,
-  wrist: 25,
   symmetry: 20,
   stability: 25,
 };
@@ -130,19 +124,16 @@ export function resetLateralRaiseWeights() {
 // Rep-level issue priority — decides which single message is shown / voiced.
 export const LR_ISSUE_PRIORITY = [
   'lr_incomplete',
-  'lr_wrist_above',
   'lr_not_high_enough',
   'lr_elbow_too_high',
   'lr_asymmetry',
   'lr_shoulder_tilt',
-  'lr_body_sway',
 ];
 
 // Stance-check cue priority — one corrective message at a time.
 export const LR_STANCE_PRIORITY = [
   'lr_no_person',
   'lr_feet_not_visible',
-  'lr_facing',
   'lr_not_upright',
   'lr_feet_narrow',
   'lr_feet_wide',
@@ -152,7 +143,6 @@ export const LR_STANCE_PRIORITY = [
 export const LR_FEEDBACK = {
   lr_no_person: 'Stand in front of the camera',
   lr_feet_not_visible: 'Step back — feet not visible',
-  lr_facing: 'Face the camera directly',
   lr_not_upright: 'Stand up straight',
   lr_feet_narrow: 'Move your feet apart to shoulder width',
   lr_feet_wide: 'Feet too wide — bring them in to shoulder width',
@@ -160,13 +150,10 @@ export const LR_FEEDBACK = {
   lr_stance_ok: 'Your stance is correct. Start the exercise.',
 
   lr_incomplete: 'Incomplete rep — raise both arms together',
-  lr_wrist_above: 'Lower your hands, wrists should stay below shoulder level',
   lr_not_high_enough: 'Raise your elbows up to the shoulder line',
   lr_elbow_too_high: 'Elbows too high — stop at shoulder level',
   lr_asymmetry: 'Raise both arms to the same height',
   lr_shoulder_tilt: 'Keep your shoulders level — don\'t shrug',
-  lr_body_sway: 'Keep your body still — don\'t swing',
-
   lr_turned_away: 'Turned away',
   lr_arms_resting: 'Arms resting',
   lr_out_of_frame: 'Out of frame',
@@ -177,7 +164,6 @@ export const LR_VOICE_MSG = {
   setup_begin: 'Stand facing the camera with your feet shoulder width apart and your arms down at your sides.',
   lr_no_person: 'Please stand in front of the camera.',
   lr_feet_not_visible: 'Step back so your full body, including your feet, is visible.',
-  lr_facing: 'Please turn and face the camera.',
   lr_not_upright: 'Stand up straight.',
   lr_feet_narrow: 'Move your feet apart to shoulder width.',
   lr_feet_wide: 'Your feet are too wide. Bring them in to shoulder width.',

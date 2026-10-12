@@ -20,8 +20,9 @@ export const SP_CFG_DEFAULTS = {
   min_visibility: 0.5,
 
   // ── Stance (feet) ────────────────────────────────────────────────────────
-  // Setup only checks ankle width vs shoulder width — NOT body centering.
-  // ankle width / shoulder width must sit within [1 - narrow, 1 + wide].
+  // Ankles only (never heel / foot index). Each ankle's distance from the
+  // shoulder midline, as a fraction of shoulder width, must sit within
+  // [(1 - narrow) / 2, (1 + wide) / 2] — the rails drawn beside each ankle.
   stance_narrow_tolerance: 0.35,
   stance_wide_tolerance: 0.45,
   // Kept for overlays / soft diagnostics; not used as a hard setup gate.
@@ -32,9 +33,6 @@ export const SP_CFG_DEFAULTS = {
   torso_lean_ratio_max: 0.18,
   // |left shoulder y - right shoulder y| / sw.
   shoulder_level_ratio_max: 0.12,
-  // Ear→shoulder vertical gap must stay above this fraction of the standing
-  // baseline captured during the stance check (0 disables the shrug check).
-  shrug_ratio_min: 0.55,
 
   // ── Arm path ─────────────────────────────────────────────────────────────
   // Wrist stacked over the elbow: forearm tilt from vertical (degrees, smoothed).
@@ -61,9 +59,8 @@ export const SP_CFG_DEFAULTS = {
 
   // ── Height (how high the dumbbells go) ───────────────────────────────────
   // Wrists should rise at least this fraction of the arm length above the
-  // shoulder line, with the elbow extended past `lockout_angle_min`.
+  // shoulder line.
   top_height_ratio: 0.85,
-  lockout_angle_min: 160,
 
   // ── Rep state machine (elbow angle, degrees) ─────────────────────────────
   bottom_angle_max: 110,
@@ -122,7 +119,6 @@ export const SP_CUE_GROUP = {
   sp_elbow_right_tucked: 'elbow',
   sp_top_wide_left: 'forearm',
   sp_top_wide_right: 'forearm',
-  sp_shrug: 'shoulder',
   sp_shoulder_high_left: 'shoulder',
   sp_shoulder_high_right: 'shoulder',
   sp_stance_narrow: 'stance',
@@ -138,7 +134,6 @@ export const SP_LIVE_PRIORITY = [
   'sp_forearm_right_inner', 'sp_forearm_right_outer',
   'sp_elbow_left_tucked', 'sp_elbow_right_tucked',
   'sp_top_wide_left', 'sp_top_wide_right',
-  'sp_shrug',
 ];
 
 // Short on-screen text per cue.
@@ -158,7 +153,6 @@ export const SP_FEEDBACK = {
   sp_elbow_right_tucked: 'Open your right elbow out',
   sp_top_wide_left: 'Left dumbbell too wide at the top',
   sp_top_wide_right: 'Right dumbbell too wide at the top',
-  sp_shrug: 'Shoulders down — don\'t shrug',
   sp_shoulder_high_left: 'Left shoulder high — level shoulders',
   sp_shoulder_high_right: 'Right shoulder high — level shoulders',
   sp_stance_narrow: 'Feet too close — widen stance',
@@ -200,7 +194,6 @@ export const SP_VOICE_MSG = {
   sp_elbow_right_tucked: 'Open your right elbow out to the side.',
   sp_top_wide_left: 'Bring your left dumbbell in, over your shoulder.',
   sp_top_wide_right: 'Bring your right dumbbell in, over your shoulder.',
-  sp_shrug: 'Keep your shoulders down, away from your ears.',
   sp_rep_fast: 'Too fast. Control the weight up and down.',
 };
 

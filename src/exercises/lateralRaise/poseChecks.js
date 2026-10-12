@@ -82,10 +82,10 @@ export function buildGeometry(pts, calib = null) {
 
 /**
  * Every stance rule, each with its own pass flag, so the overlay can show a
- * checklist. `maxSw` is the widest shoulder span seen so far during setup.
+ * checklist.
  */
-export function evaluateStance(g, maxSw) {
-  return evaluateFrontStance(g, maxSw, LR_CFG, 'lr_');
+export function evaluateStance(g) {
+  return evaluateFrontStance(g, LR_CFG, 'lr_');
 }
 
 // ── Activity helpers ────────────────────────────────────────────────────────
@@ -111,16 +111,11 @@ export function armLift(a, calib) {
 }
 
 /** Horizontal reference lines (pixel y) for the overlay. */
-export function raiseLines(g, calib) {
+export function raiseLines(g) {
   const n = g.norm;
-  const restE = calib
-    ? (calib.restElbow.left + calib.restElbow.right) / 2
-    : LR_CFG.rest_elbow_default;
   return {
     shoulderY: g.shY,
     bandTopY: g.shY - LR_CFG.elbow_above_tolerance * n,
     bandBottomY: g.shY + LR_CFG.top_tolerance * n,
-    wristLimitY: g.shY - LR_CFG.wrist_above_tolerance * n,
-    returnY: g.shY + restE * (1 - LR_CFG.lift_return) * n,
   };
 }

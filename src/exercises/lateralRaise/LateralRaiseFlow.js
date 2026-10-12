@@ -1,9 +1,9 @@
 // Dumbbell lateral raise (front view) — coaching state machine.
 //
 // Phases:
-//   SETUP_STANCE       — upright, feet ≈ shoulder width, arms down, facing the
-//                        camera, held ~1 s → calibration (shoulder width,
-//                        resting elbow / wrist height, shoulder tilt baseline)
+//   SETUP_STANCE       — upright, feet ≈ shoulder width, arms down, held ~1 s
+//                        → calibration (shoulder width, resting elbow / wrist
+//                        height, shoulder tilt baseline)
 //   READY              — short settle (lets the stance voice line finish)
 //   ACTIVE             — rep counting per set; says "Rep N" after each rep
 //   REST_BETWEEN_SETS  — not scored; resumes via continueNextSet() or
@@ -45,7 +45,6 @@ const REP_MISTAKE_HOLD_SEC = 3.0;
 const INSTRUCTION_CONFIRM_SEC = 0.4;
 const INSTRUCTION_MIN_WAIT_SEC = 2.5;
 const FEEDBACK_HOLD_SEC = 2.5;
-const MAX_SW_DECAY = 0.998;
 const CALIB_MAX_SAMPLES = 60;
 
 export class LateralRaiseFlow {
@@ -64,7 +63,6 @@ export class LateralRaiseFlow {
     this._phase = LR_PHASE.SETUP_STANCE;
     this._smoother.reset();
     this._calib = null;
-    this._maxSw = 0;
     this._stancePassSince = -1;
     this._calibSamples = [];
     this._setupBeginSent = false;
@@ -313,8 +311,7 @@ export class LateralRaiseFlow {
       });
     }
 
-    this._maxSw = Math.max(g.sw, this._maxSw * MAX_SW_DECAY);
-    const st = evaluateStance(g, this._maxSw);
+    const st = evaluateStance(g);
 
     if (!st.ok) {
       this._stancePassSince = -1;
@@ -449,9 +446,7 @@ export class LateralRaiseFlow {
 
     const sustained = rep.inProgress ? this._sustained(res.liveKeys, now) : this._sustained([], now);
     const shownLive = this._mistakeGate.filter(sustained);
-    const primaryLive = shownLive.includes('lr_wrist_above')
-      ? 'lr_wrist_above'
-      : shownLive[0] || null;
+    const primaryLive = shownLive[0] || null;
     if (primaryLive) {
       this._setFeedback(LR_FEEDBACK[primaryLive], now, 1.0);
       this._setMistake(primaryLive, now, LIVE_MISTAKE_HOLD_SEC);
@@ -563,7 +558,7 @@ export class LateralRaiseFlow {
     const remaining = Math.max(0, this._restDuration() - (now - this._restStart));
     let inStance = false;
     if (g && this._calib) {
-      const st = evaluateStance(g, g.norm);
+      const st = evaluateStance(g);
       inStance = st.ok;
     }
     if (inStance) {

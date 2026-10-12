@@ -85,8 +85,8 @@ export function buildCurlGeometry(pts, calib = null) {
 
 // ── Stance (SETUP_STANCE) ───────────────────────────────────────────────────
 
-export function evaluateCurlStance(g, maxSw) {
-  return evaluateFrontStance(g, maxSw, DC_CFG, 'dc_');
+export function evaluateCurlStance(g) {
+  return evaluateFrontStance(g, DC_CFG, 'dc_');
 }
 
 // ── Activity helpers ────────────────────────────────────────────────────────

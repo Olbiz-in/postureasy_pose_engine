@@ -84,10 +84,10 @@ export function buildGeometry(pts, calib = null) {
 
 /**
  * Every stance rule, each with its own pass flag, so the overlay can show a
- * checklist. `maxSw` is the widest shoulder span seen so far during setup.
+ * checklist.
  */
-export function evaluateStance(g, maxSw) {
-  return evaluateFrontStance(g, maxSw, FR_CFG, 'fr_');
+export function evaluateStance(g) {
+  return evaluateFrontStance(g, FR_CFG, 'fr_');
 }
 
 // ── Activity helpers ────────────────────────────────────────────────────────

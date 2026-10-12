@@ -125,9 +125,7 @@ export class ShoulderPressRepTracker {
     }
     if (p.maxDrop > SP_CFG.depth_elbow_low_ratio) errors.add('sp_too_deep');
     else if (p.maxDrop < -SP_CFG.depth_elbow_high_ratio) errors.add('sp_not_low_enough');
-    if (!(c.maxAngle >= SP_CFG.lockout_angle_min && c.bestRise >= SP_CFG.top_height_ratio)) {
-      errors.add('sp_press_higher');
-    }
+    if (c.bestRise < SP_CFG.top_height_ratio) errors.add('sp_press_higher');
     if (p.repSec > 0 && p.repSec < SP_CFG.rep_min_sec) errors.add('sp_rep_fast');
     // The two depth faults are mutually exclusive for a single rep.
     if (errors.has('sp_too_deep')) errors.delete('sp_not_low_enough');

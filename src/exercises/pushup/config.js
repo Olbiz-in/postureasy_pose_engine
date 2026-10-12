@@ -30,13 +30,6 @@ export const PUSHUP_CFG = {
   elbow_right_inner_offset_ratio: 0.04,
   elbow_right_outer_offset_ratio: 0.1,
 
-  // Hand orientation (wrist → index finger signed ratio)
-  hand_rotation_ratio_max: 0.08,
-  hand_left_inner_offset_ratio: 0.03,
-  hand_left_outer_offset_ratio: 0.03,
-  hand_right_inner_offset_ratio: 0.03,
-  hand_right_outer_offset_ratio: 0.03,
-
   // Wrist–elbow collinearity (forearm straightness)
   wrist_elbow_collinear_ratio_max: 0.06,
 
@@ -69,10 +62,6 @@ export const PUSHUP_FEEDBACK = {
   elbow_right_outer: 'Flare your right elbow outward',
   forearm_left: 'Keep your left forearm straight',
   forearm_right: 'Keep your right forearm straight',
-  hand_left_inner: 'Rotate your left hand inward',
-  hand_left_outer: 'Rotate your left hand outward',
-  hand_right_inner: 'Rotate your right hand inward',
-  hand_right_outer: 'Rotate your right hand outward',
   pushup_too_deep: 'Too deep — rise up slightly',
   pushup_shoulder_deep: 'Shoulders too low — come up a little',
 };
@@ -98,10 +87,6 @@ export const PUSHUP_VOICE_MSG = {
   elbow_right_outer: 'Flare your right elbow outward.',
   forearm_left: 'Keep your left forearm straight.',
   forearm_right: 'Keep your right forearm straight.',
-  hand_left_inner: 'Rotate your left hand inward.',
-  hand_left_outer: 'Rotate your left hand outward.',
-  hand_right_inner: 'Rotate your right hand inward.',
-  hand_right_outer: 'Rotate your right hand outward.',
   pushup_too_deep: 'Too deep! Rise up slightly.',
   pushup_shoulder_deep: 'Shoulders too low. Come up a little.',
 };
