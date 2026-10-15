@@ -37,6 +37,7 @@ export {
   FRONT_RAISE_TOLERANCE_GROUPS,
   DUMBBELL_CURL_TOLERANCE_GROUPS,
   SINGLE_ARM_DUMBBELL_ROW_TOLERANCE_GROUPS,
+  LUNGE_TOLERANCE_GROUPS,
   getSquatToleranceConfig,
   getPushUpToleranceConfig,
   getShoulderPressToleranceConfig,
@@ -44,6 +45,7 @@ export {
   getFrontRaiseToleranceConfig,
   getDumbbellCurlToleranceConfig,
   getSingleArmDumbbellRowToleranceConfig,
+  getLungeToleranceConfig,
 } from './exercises/toleranceDefinitions.js';
 
 export {
@@ -97,6 +99,15 @@ export {
   resetLungeCfg,
 } from './exercises/lunge/config.js';
 export { LUNGE_PHASE } from './exercises/lunge/LungeFlow.js';
+
+export {
+  LGR_CFG,
+  LGR_CFG_DEFAULTS,
+  LGR_SCORE_WEIGHTS,
+  resetLegRaiseCfg,
+  setLegRaiseDebug,
+} from './exercises/legRaise/config.js';
+export { LGR_PHASE } from './exercises/legRaise/LegRaiseFlow.js';
 
 export {
   SR_CFG,

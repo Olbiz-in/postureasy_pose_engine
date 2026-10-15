@@ -21,7 +21,7 @@ import { RepeatMistakeGate } from '../common/repeatMistakeGate.js';
 import { clamp, firstByPriority } from '../common/math.js';
 import {
   LUNGE_CFG, LUNGE_FEEDBACK, LUNGE_VOICE_MSG, LUNGE_TRACKED_LANDMARKS,
-  LUNGE_ISSUE_PRIORITY, LUNGE_SETUP_PRIORITY, LUNGE_ISSUE_JOINTS,
+  LUNGE_ISSUE_PRIORITY, LUNGE_SETUP_PRIORITY, LUNGE_ISSUE_JOINTS, LUNGE_LEG_JOINTS,
   LUNGE_COLOR_GREEN, LUNGE_COLOR_AMBER, LUNGE_COLOR_RED, LUNGE_COLOR_GREY,
 } from './config.js';
 import {
@@ -51,7 +51,7 @@ export class LungeFlow {
     this._targetReps = targetReps > 0 ? targetReps : 0;
     this._smoother = new LandmarkSmoother(LUNGE_CFG, LUNGE_TRACKED_LANDMARKS);
     this._rep = new LungeRepTracker(this._view);
-    this._mistakeGate = new RepeatMistakeGate();
+    this._mistakeGate = new RepeatMistakeGate({ pick: (k) => firstByPriority(k, LUNGE_ISSUE_PRIORITY) });
     this._scores = createScoreAverager();
     this._resetState();
   }
@@ -227,6 +227,7 @@ export class LungeFlow {
       mistake: now <= this._mistakeUntil ? this._mistake : '',
       repCount: rep.count,
       movement: rep.state,
+      frontLeg: rep.activeLeg,
       depth: rep.depth,
       progress: 0,
       formScore: this._scores.value,
@@ -418,9 +419,16 @@ export class LungeFlow {
       progress: depth == null ? 0 : clamp(depth / LUNGE_CFG.depth_full, 0, 1),
       sustainedCues: sustained,
       shownCues: shown,
-      redJoints: [...new Set(sustained.flatMap((k) => LUNGE_ISSUE_JOINTS[k] || []))],
+      redJoints: [...new Set([...shown, ...(out.shownKey ? [out.shownKey] : [])]
+        .flatMap((k) => this._issueJoints(k)))],
       ...this._repOutputs(res),
     });
+  }
+
+  _issueJoints(key) {
+    if (key !== 'lunge_front_shin') return LUNGE_ISSUE_JOINTS[key] || [];
+    const leg = this._rep.activeLeg ?? this._rep.lastRep?.frontLeg;
+    return LUNGE_LEG_JOINTS[leg] || [];
   }
 
   _repOutputs(res) {

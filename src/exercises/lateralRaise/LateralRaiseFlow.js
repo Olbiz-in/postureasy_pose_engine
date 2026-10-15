@@ -16,7 +16,7 @@
 import { VoiceManager } from '../../core/voiceManager.js';
 import { nowSec } from '../../core/landmarks.js';
 import {
-  LR_CFG, LR_FEEDBACK, LR_VOICE_MSG, LR_STANCE_PRIORITY, LR_TRACKED_LANDMARKS,
+  LR_CFG, LR_FEEDBACK, LR_VOICE_MSG, LR_STANCE_PRIORITY, LR_ISSUE_PRIORITY, LR_TRACKED_LANDMARKS,
   LR_COLOR_GREEN, LR_COLOR_AMBER, LR_COLOR_RED, LR_COLOR_GREY,
 } from './config.js';
 import { LandmarkSmoother } from '../common/landmarkSmoother.js';
@@ -88,7 +88,7 @@ export class LateralRaiseFlow {
     this._lastTickAt = -1;
 
     this._cueOnset = new Map();
-    this._mistakeGate = new RepeatMistakeGate();
+    this._mistakeGate = new RepeatMistakeGate({ pick: (k) => firstByPriority(k, LR_ISSUE_PRIORITY) });
     this._mistake = '';
     this._mistakeUntil = -1;
     this._feedback = '';
@@ -469,7 +469,7 @@ export class LateralRaiseFlow {
     let status;
     if (this._isLongIdle(now)) status = LR_FEEDBACK.lr_long_idle;
     else if (!rep.inProgress) status = `Raise both arms — rep ${rep.setCount + 1}`;
-    else if (res.topSides.length || rep.armState('left') === 'UP') status = 'Elbows to the shoulder line…';
+    else if (res.topSides.length || rep.armState('left') === 'UP') status = 'Elbows and wrists to the shoulder line…';
     else status = 'Raise both arms…';
 
     return this._result(g, now, {

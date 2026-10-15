@@ -110,6 +110,21 @@ export function armLift(a, calib) {
   };
 }
 
+/**
+ * Left vs right height difference (/ norm) of the elbows and of the wrists.
+ * `ratio` is the larger difference as a multiple of its tolerance (> 1 =
+ * uneven). All null when either arm is not tracked.
+ */
+export function armLevelDiff(g) {
+  const L = g.left;
+  const R = g.right;
+  if (!L.ok || !R.ok) return { elbow: null, wrist: null, ratio: null };
+  const elbow = Math.abs(L.elbowDy - R.elbowDy);
+  const wrist = Math.abs(L.wristDy - R.wristDy);
+  const ratio = Math.max(elbow / LR_CFG.symmetry_max, wrist / LR_CFG.symmetry_wrist_max);
+  return { elbow, wrist, ratio };
+}
+
 /** Horizontal reference lines (pixel y) for the overlay. */
 export function raiseLines(g) {
   const n = g.norm;

@@ -41,14 +41,15 @@ export function drawShoulderLine(ctx, g, calib, mirrored, h) {
   const size = Math.max(10, Math.round(h * 0.02));
 
   const inBand = (y) => y >= L.bandTopY && y <= L.bandBottomY;
-  const elbows = [g.left, g.right].filter((a) => a.ok).map((a) => a.elbow);
-  const inCount = elbows.filter((e) => inBand(e.y)).length;
+  const arms = [g.left, g.right].filter((a) => a.ok);
+  // An arm is "in" only when its elbow AND wrist are both inside the band.
+  const inCount = arms.filter((a) => inBand(a.elbow.y) && inBand(a.wrist.y)).length;
   const lineColor = inCount === 2 ? GREEN : inCount === 1 ? AMBER : CYAN;
 
   ctx.save();
 
-  // Upper / lower offset lines — elbows must land between them at the top.
-  const elbowOver = elbows.some((e) => e.y < L.bandTopY);
+  // Upper / lower offset lines — elbows and wrists must land between them at the top.
+  const elbowOver = arms.some((a) => a.elbow.y < L.bandTopY || a.wrist.y < L.bandTopY);
   ctx.fillStyle = inCount === 2 ? 'rgba(0,255,80,0.16)' : 'rgba(0,200,255,0.10)';
   ctx.fillRect(x0, L.bandTopY, x1 - x0, L.bandBottomY - L.bandTopY);
   ctx.lineWidth = 2;
@@ -66,14 +67,58 @@ export function drawShoulderLine(ctx, g, calib, mirrored, h) {
   line(ctx, x0, L.shoulderY, x1, L.shoulderY);
   label(ctx, 'SHOULDER LINE', labelX, L.shoulderY - 6, mirrored, lineColor, { size });
 
-  for (const a of [g.left, g.right]) {
-    if (!a.ok) continue;
-    const e = a.elbow;
-    const eColor = e.y < L.bandTopY ? RED : inBand(e.y) ? GREEN : CYAN;
-    dot(ctx, e.x, e.y, 6, eColor);
-    dot(ctx, a.wrist.x, a.wrist.y, 5, WHITE);
+  const jointColor = (p) => (p.y < L.bandTopY ? RED : inBand(p.y) ? GREEN : CYAN);
+  for (const a of arms) {
+    dot(ctx, a.elbow.x, a.elbow.y, 6, jointColor(a.elbow));
+    dot(ctx, a.wrist.x, a.wrist.y, 7, WHITE);
+    dot(ctx, a.wrist.x, a.wrist.y, 5, jointColor(a.wrist));
   }
   ctx.restore();
+}
+
+// ── Left / right evenness guide ─────────────────────────────────────────────
+//
+// While the arms move, the two elbows (and the two wrists) are joined by a
+// level line, and each joint gets a bracket of the allowed height difference
+// centred on the pair's mean height: both joints inside their brackets ⇔ the
+// pair is within tolerance.
+
+function drawLevelPair(ctx, a, b, tolPx, mirrored, size, text) {
+  const mean = (a.y + b.y) / 2;
+  const half = tolPx / 2;
+  const even = Math.abs(a.y - b.y) <= tolPx;
+  const color = even ? GREEN : AMBER;
+  const tick = Math.max(6, size * 0.6);
+
+  ctx.save();
+  ctx.lineWidth = 2;
+  ctx.strokeStyle = color;
+  ctx.setLineDash([6, 5]);
+  line(ctx, a.x, a.y, b.x, b.y);
+  ctx.setLineDash([]);
+  for (const p of [a, b]) {
+    const inside = Math.abs(p.y - mean) <= half;
+    ctx.strokeStyle = inside ? GREEN : AMBER;
+    line(ctx, p.x, mean - half, p.x, mean + half);
+    line(ctx, p.x - tick, mean - half, p.x + tick, mean - half);
+    line(ctx, p.x - tick, mean + half, p.x + tick, mean + half);
+  }
+  ctx.restore();
+  label(ctx, `${text} ${even ? 'LEVEL' : 'UNEVEN'}`, (a.x + b.x) / 2, mean - half - 4, mirrored, color, {
+    size: size - 1, align: 'center',
+  });
+}
+
+export function drawSymmetryGuide(ctx, g, fr, mirrored, h) {
+  if (!g || fr.phase !== LR_PHASE.ACTIVE) return;
+  const L = g.left;
+  const R = g.right;
+  if (!L.ok || !R.ok) return;
+  const moving = fr.armStates?.left === 'UP' || fr.armStates?.right === 'UP';
+  if (!moving) return;
+  const size = Math.max(10, Math.round(h * 0.02));
+  drawLevelPair(ctx, L.elbow, R.elbow, LR_CFG.symmetry_max * g.norm, mirrored, size, 'ELBOWS');
+  drawLevelPair(ctx, L.wrist, R.wrist, LR_CFG.symmetry_wrist_max * g.norm, mirrored, size, 'WRISTS');
 }
 
 export function drawDebugReadout(ctx, fr, w, h, mirrored) {
@@ -85,6 +130,8 @@ export function drawDebugReadout(ctx, fr, w, h, mirrored) {
     `L elbowDy ${f(g?.left.elbowDy)} wristDy ${f(g?.left.wristDy)} ${fr.armStates.left}`,
     `R elbowDy ${f(g?.right.elbowDy)} wristDy ${f(g?.right.wristDy)} ${fr.armStates.right}`,
     `band −${LR_CFG.elbow_above_tolerance}…+${LR_CFG.top_tolerance}`,
+    `L−R elbow ${f(g?.left.ok && g?.right.ok ? Math.abs(g.left.elbowDy - g.right.elbowDy) : null)}/${LR_CFG.symmetry_max}`
+      + `  wrist ${f(g?.left.ok && g?.right.ok ? Math.abs(g.left.wristDy - g.right.wristDy) : null)}/${LR_CFG.symmetry_wrist_max}`,
   ];
   if (fr.calib) {
     const c = fr.calib;
@@ -106,6 +153,7 @@ export function drawLateralRaiseOverlay(ctx, fr, frame) {
     drawStanceChecklist(ctx, fr, w, h, mirrored, stanceOpts);
   } else if (g) {
     drawShoulderLine(ctx, g, fr.calib, mirrored, h);
+    drawSymmetryGuide(ctx, g, fr, mirrored, h);
   }
 
   drawActivityBadge(ctx, fr, w, h, mirrored, { reasonLabels: REASON_LABEL, warnReasons: WARN_REASONS });

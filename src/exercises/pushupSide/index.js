@@ -50,7 +50,7 @@ function createSidePushUpTracker(options = {}) {
   const voice = new VoiceManager();
   const rep = new SidePushUpRepTracker();
   let repErrorKeys = new Set();
-  const mistakeGate = new RepeatMistakeGate();
+  const mistakeGate = new RepeatMistakeGate({ pick: (k) => selectPrimaryError(k)?.key ?? null });
   const scores = createScoreAverager();
   let downStartT = -1;
   let cycleStartT = -1;
@@ -138,7 +138,7 @@ function createSidePushUpTracker(options = {}) {
         }
 
         // Live voice during the rep
-        const primaryKey = mistakeGate.allows(posture.cueKeys[0]) ? posture.cueKeys[0] : '';
+        const primaryKey = mistakeGate.claim(posture.cueKeys[0]) ? posture.cueKeys[0] : '';
         if (primaryKey && primaryKey !== lastLiveCueKey) {
           const msg = SIDE_PUSHUP_FEEDBACK[primaryKey];
           if (msg) {

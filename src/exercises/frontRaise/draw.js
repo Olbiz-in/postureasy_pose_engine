@@ -68,15 +68,32 @@ export function drawShoulderLine(ctx, g, calib, mirrored, h) {
   line(ctx, x0, L.shoulderY, x1, L.shoulderY);
   label(ctx, 'SHOULDER LINE', labelX, L.shoulderY - 6, mirrored, lineColor, { size });
 
-  // Arm lanes — wrists should stay inside these while the arms are raised.
-  for (const a of [g.left, g.right]) {
+  // Arm lane — side offset limits, `flare_tolerance` outside each shoulder.
+  // Wrists must stay between the two lines while the arms are raised.
+  const lanes = [g.left, g.right].map((a) => {
     const outSign = a.shoulder.x >= g.shMid.x ? 1 : -1;
-    const laneX = a.shoulder.x + outSign * FR_CFG.flare_tolerance * n;
-    const flared = a.ok && a.wristOut > FR_CFG.flare_tolerance && a.wrist.y < L.returnY;
-    ctx.lineWidth = flared ? 2 : 1;
-    ctx.setLineDash([4, 6]);
-    ctx.strokeStyle = flared ? blink() : 'rgba(0,200,255,0.45)';
-    line(ctx, laneX, L.bandTopY, laneX, L.returnY);
+    const raised = a.ok && a.wrist.y < L.returnY;
+    return {
+      x: a.shoulder.x + outSign * FR_CFG.flare_tolerance * n,
+      raised,
+      flared: raised && a.wristOut > FR_CFG.flare_tolerance,
+    };
+  });
+  const anyFlared = lanes.some((l) => l.flared);
+  const allInside = lanes.every((l) => l.raised && !l.flared);
+  const laneX0 = Math.min(lanes[0].x, lanes[1].x);
+  const laneX1 = Math.max(lanes[0].x, lanes[1].x);
+  ctx.fillStyle = anyFlared ? 'rgba(255,40,40,0.10)' : allInside ? 'rgba(0,255,80,0.08)' : 'rgba(0,200,255,0.06)';
+  ctx.fillRect(laneX0, L.bandTopY, laneX1 - laneX0, L.returnY - L.bandTopY);
+  const laneW = Math.max(2, Math.round(h * 0.003));
+  for (const lane of lanes) {
+    ctx.lineWidth = lane.flared ? laneW + 1 : laneW;
+    ctx.setLineDash([8, 6]);
+    ctx.strokeStyle = lane.flared ? blink() : allInside ? 'rgba(0,255,80,0.9)' : 'rgba(0,200,255,0.9)';
+    line(ctx, lane.x, L.bandTopY, lane.x, L.returnY);
+    ctx.setLineDash([]);
+    const laneColor = lane.flared ? RED : allInside ? GREEN : CYAN;
+    label(ctx, 'SIDE LIMIT', lane.x, L.returnY - 6, mirrored, laneColor, { size: size - 2, align: 'center' });
   }
   ctx.setLineDash([]);
 

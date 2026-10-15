@@ -63,6 +63,8 @@ function toTrackerState(flow, fr, view) {
     skeletonColor: fr.boneColor,
     // Confirmed (gated) mistakes only — used for mistake snapshots.
     postureResult: { cueKeys: fr.shownCues },
+    // Every detected mistake, ungated — mistake snapshots capture first occurrences too.
+    mistakeCues: fr.sustainedCues,
     stanceData: !active && fr.stanceResult ? { allCues: fr.stanceResult.cueKeys || [] } : null,
     legCounts: fr.legCounts,
     depth: fr.depth,

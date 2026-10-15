@@ -84,6 +84,10 @@ export function resolveExerciseId(nameOrId, view) {
       // Stationary lunge variants only; walking / jumping / lateral lunges move the body through the frame.
       baseId = _aliasIndex.get('lunge') || null;
     }
+    else if (/\bleg\s*raises?\b/.test(key) && !/hanging|captain|standing|side|lateral|seated|donkey|single|one[\s-]*leg|incline|decline|bench|cable|machine|weighted|dumbbell|band/.test(key)) {
+      // Lying leg raise only; hanging / captain's chair / side-lying variants are different movements.
+      baseId = _aliasIndex.get('leg raise') || null;
+    }
     else if (key.includes('squat')) baseId = _aliasIndex.get('squat') || 'squat';
     else if (key.includes('push')) baseId = _aliasIndex.get('pushup') || 'pushup';
     else if (/(dumbbell|bicep|biceps|hammer)\s*curl/.test(key) && !/concentration|preacher|cable|barbell|spider|incline/.test(key)) {

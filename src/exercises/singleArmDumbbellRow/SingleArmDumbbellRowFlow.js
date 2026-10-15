@@ -34,7 +34,7 @@
 import { VoiceManager } from '../../core/voiceManager.js';
 import { nowSec } from '../../core/landmarks.js';
 import {
-  SR_CFG, SR_FEEDBACK, SR_VOICE_MSG, SR_SETUP_PRIORITY, SR_LIVE_PRIORITY, SR_TRACKED_LANDMARKS,
+  SR_CFG, SR_FEEDBACK, SR_VOICE_MSG, SR_SETUP_PRIORITY, SR_ISSUE_PRIORITY, SR_LIVE_PRIORITY, SR_TRACKED_LANDMARKS,
   SR_COLOR_GREEN, SR_COLOR_AMBER, SR_COLOR_RED, SR_COLOR_GREY,
 } from './config.js';
 import { LandmarkSmoother } from '../common/landmarkSmoother.js';
@@ -126,7 +126,9 @@ export class SingleArmDumbbellRowFlow {
     this._lastTickAt = -1;
 
     this._cueOnset = new Map();
-    this._mistakeGate = new RepeatMistakeGate();
+    this._mistakeGate = new RepeatMistakeGate({
+      pick: (k) => firstByPriority(k, [...SR_ISSUE_PRIORITY, ...SR_LIVE_PRIORITY]),
+    });
     this._lastCorrectionAt = -1;
     this._mistake = '';
     this._mistakeUntil = -1;

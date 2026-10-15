@@ -14,6 +14,7 @@ const HIP_HALF = 28;
 const TORSO = 120;
 const ANKLE_Y = 440;
 const STAND_H = 210;
+const SHIN = STAND_H / 2;
 
 export function blankLandmarks() {
   return Array.from({ length: 33 }, () => ({ x: 0.5, y: 0.5, z: 0, visibility: 0 }));
@@ -32,12 +33,13 @@ function put(lms, index, px, py, vis = 0.99) {
  * @param {number} [o.hipShift]       hip drift / torso (front, + = image right)
  * @param {number} [o.trunkSway]      shoulder-over-hip offset / torso (front)
  * @param {number} [o.pelvisTilt]     (left hip y − right hip y) / torso (front)
- * @param {number} [o.leanPx]         shoulders ahead of hips in px (side)
+ * @param {number} [o.leanPx]         shoulders ahead of hips in px (side, − = leaning back)
+ * @param {number} [o.shinPx]         front knee ahead of the front ankle at full depth, px (side)
  * @param {Object<number,number>} [o.vis]  per-landmark visibility overrides
  */
 export function makePose({
   view = 'front', depth = 0, lead = 'left', valgus = {}, hipShift = 0, trunkSway = 0,
-  pelvisTilt = 0, leanPx = 0, vis = {},
+  pelvisTilt = 0, leanPx = 0, shinPx = 10, vis = {},
 } = {}) {
   const lms = blankLandmarks();
   const lunging = depth > 0.03;
@@ -91,9 +93,9 @@ export function makePose({
     ]) {
       const front = lunging && side === lead;
       const ax = ankleX[side];
-      // Front knee pushes forward as the hip drops; rear knee drops toward the floor.
-      const kneeX = (hx + ax) / 2 + (front ? 70 * depth / 0.35 : -10 * depth / 0.35);
-      const kneeY = (hipY + ANKLE_Y) / 2 + (front ? 0 : 30 * depth / 0.35);
+      // Front knee stays (about) above its ankle at shin height; rear knee drops toward the floor.
+      const kneeX = front ? ax + shinPx * depth / 0.35 : (hx + ax) / 2 - 10 * depth / 0.35;
+      const kneeY = front ? ANKLE_Y - SHIN : (hipY + ANKLE_Y) / 2 + 30 * depth / 0.35;
       put(lms, hipLm, hx + (side === 'left' ? 2 : -2), hipY, v);
       put(lms, kneeLm, kneeX, kneeY, v);
       put(lms, ankleLm, ax, ANKLE_Y, v);

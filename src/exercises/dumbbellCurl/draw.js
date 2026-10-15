@@ -123,13 +123,18 @@ export function drawProgressBars(ctx, fr, w, h, mirrored) {
   const bh = Math.round(h * 0.30);
   // On a mirrored (selfie) view the user's left arm appears on screen-left.
   const screenLeftSide = mirrored ? 'left' : 'right';
+  const ap = fr.armProgress || {};
+  const lagging = (fr.sustainedCues || []).includes('dc_arms_uneven') && ap.left != null && ap.right != null
+    ? (ap.left < ap.right ? 'left' : 'right')
+    : null;
   for (const side of ['left', 'right']) {
-    const p = fr.armProgress?.[side];
+    const p = ap[side];
     const sx = side === screenLeftSide ? 14 : w - 14 - bw;
     screenBox(ctx, sx - 4, top - size - 10, bw + 8, bh + size * 2 + 22, w, mirrored, PANEL);
     screenBox(ctx, sx, top, bw, bh, w, mirrored, 'rgba(255,255,255,0.12)');
     if (p != null) {
-      const fill = p >= topProgressAt(side, fr.calib) ? GREEN : p >= DC_CFG.curl_start ? CYAN : 'rgba(200,200,200,0.8)';
+      const fill = side === lagging ? RED
+        : p >= topProgressAt(side, fr.calib) ? GREEN : p >= DC_CFG.curl_start ? CYAN : 'rgba(200,200,200,0.8)';
       const ph = Math.round(bh * p);
       screenBox(ctx, sx, top + bh - ph, bw, ph, w, mirrored, fill);
     }

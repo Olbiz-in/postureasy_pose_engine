@@ -39,8 +39,21 @@ export function dot(ctx, x, y, r, color) {
   ctx.fill();
 }
 
-export function fontPx(h, scale = 1) {
-  return Math.round(Math.max(12, h * 0.028) * scale);
+const MIN_FONT_PX = 10;
+
+/**
+ * Base text size for a w×h canvas. Follows the height on landscape frames
+ * and is capped by the width on portrait ones, so text keeps the same
+ * proportion on any orientation / resolution (SD → UHD).
+ */
+export function fontPx(h, scale = 1, w = Infinity) {
+  const base = Math.min(h, w * 1.25);
+  return Math.round(Math.max(12, base * 0.028) * scale);
+}
+
+/** Edge margin for HUD boxes. */
+export function hudMargin(w, h) {
+  return Math.max(8, Math.round(Math.min(w, h) * 0.025));
 }
 
 /** Text at a CANVAS point, readable on a mirrored canvas. */
@@ -83,6 +96,66 @@ export function measure(ctx, text, size, weight = 700) {
   return tw;
 }
 
+function wrapWords(ctx, text, size, weight, maxW) {
+  const words = String(text).split(/\s+/).filter(Boolean);
+  const lines = [];
+  let cur = '';
+  for (const word of words) {
+    const next = cur ? `${cur} ${word}` : word;
+    if (cur && measure(ctx, next, size, weight) > maxW) {
+      lines.push(cur);
+      cur = word;
+    } else {
+      cur = next;
+    }
+  }
+  if (cur) lines.push(cur);
+  return lines;
+}
+
+/**
+ * Largest size ≤ `size` at which `text` fits in `maxLines` word-wrapped lines
+ * no wider than `maxW`.
+ * @returns {{ size: number, lines: string[], width: number }}
+ */
+export function fitText(ctx, text, size, weight, maxW, maxLines = 1) {
+  let s = Math.max(MIN_FONT_PX, size);
+  for (;;) {
+    const lines = maxLines > 1 ? wrapWords(ctx, text, s, weight, maxW) : [String(text)];
+    const widest = Math.max(0, ...lines.map((l) => measure(ctx, l, s, weight)));
+    if ((lines.length <= maxLines && widest <= maxW) || s <= MIN_FONT_PX) {
+      return { size: s, lines, width: Math.min(widest, maxW) };
+    }
+    s = Math.max(MIN_FONT_PX, Math.floor(s * 0.9));
+  }
+}
+
+/**
+ * Horizontally centred, word-wrapped text box whose bottom edge sits at
+ * `bottomY`; it never exceeds the frame width.
+ * @returns {number} y of the box's top edge
+ */
+export function drawTextBox(ctx, text, bottomY, w, h, mirrored, {
+  size, weight = 700, color = HUD_WHITE, fill = HUD_PANEL, border = null, maxLines = 3,
+} = {}) {
+  const margin = hudMargin(w, h);
+  const bd = border ? 3 : 0;
+  const pad = Math.max(6, Math.round(size * 0.5));
+  const fit = fitText(ctx, text, size, weight, Math.max(20, w - 2 * (margin + pad + bd)), maxLines);
+  const lineH = Math.round(fit.size * 1.25);
+  const bw = fit.width + 2 * pad;
+  const bh = lineH * fit.lines.length + pad;
+  const bx = (w - bw) / 2;
+  const by = bottomY - bd - bh;
+  if (border) screenBox(ctx, bx - bd, by - bd, bw + 2 * bd, bh + 2 * bd, w, mirrored, border);
+  screenBox(ctx, bx, by, bw, bh, w, mirrored, fill);
+  fit.lines.forEach((ln, i) => {
+    const baseline = by + pad / 2 + i * lineH + Math.round(fit.size * 0.95);
+    screenText(ctx, ln, w / 2, baseline, w, mirrored, color, { size: fit.size, weight, align: 'center' });
+  });
+  return by - bd;
+}
+
 // ── Stance check ────────────────────────────────────────────────────────────
 
 /** Min / max rails per ankle; each ankle turns red when it is outside its own rails. */
@@ -117,13 +190,14 @@ const DEFAULT_STANCE_ROWS = [
 export function drawStanceChecklist(ctx, fr, w, h, mirrored, { stanceMin, stanceMax, rows = DEFAULT_STANCE_ROWS }) {
   const st = fr.stanceResult;
   const checks = st?.checks || {};
-  const size = fontPx(h, 0.85);
   const items = rows.map(([text, key]) => [text, checks[key]]);
   const pad = 10;
+  const sx = 14;
+  const widestRow = items.map(([t]) => `✓  ${t}`).reduce((a, b) => (a.length >= b.length ? a : b), '');
+  const size = fitText(ctx, widestRow, fontPx(h, 0.85, w), 600, w - 2 * sx - pad * 2).size;
   const rowH = size + 8;
   const bw = Math.max(...items.map(([t]) => measure(ctx, `✓  ${t}`, size, 600))) + pad * 2;
   const bh = rowH * items.length + pad * 2 + size + 6;
-  const sx = 14;
   const sy = Math.round(h * 0.16);
 
   screenBox(ctx, sx, sy, bw, bh, w, mirrored, HUD_PANEL);
@@ -155,9 +229,10 @@ export function drawStanceChecklist(ctx, fr, w, h, mirrored, { stanceMin, stance
 export function drawActivityBadge(ctx, fr, w, h, mirrored, { reasonLabels = {}, warnReasons = [] } = {}) {
   const exercising = fr.activity === 'exercising';
   const text = exercising ? 'EXERCISING' : 'NOT DOING EXERCISE';
-  const size = fontPx(h, 0.9);
-  const tw = measure(ctx, text, size, 800);
   const sx = 14;
+  // Shares the top row with the counters: at most half the width each.
+  const size = fitText(ctx, text, fontPx(h, 0.9, w), 800, w / 2 - sx - 20).size;
+  const tw = measure(ctx, text, size, 800);
   const sy = 12;
   const idleWarn = warnReasons.includes(fr.activityReason);
   const fill = exercising ? 'rgba(0,170,70,0.9)' : idleWarn ? 'rgba(230,120,0,0.9)' : 'rgba(90,90,90,0.9)';
@@ -166,7 +241,8 @@ export function drawActivityBadge(ctx, fr, w, h, mirrored, { reasonLabels = {}, 
 
   const reason = exercising ? '' : reasonLabels[fr.activityReason] || '';
   if (reason) {
-    screenText(ctx, reason, sx + 2, sy + size * 2 + 16, w, mirrored, HUD_WHITE, { size: size - 2, weight: 600 });
+    const rSize = fitText(ctx, reason, size - 2, 600, w / 2 - sx - 2).size;
+    screenText(ctx, reason, sx + 2, sy + size * 2 + 16, w, mirrored, HUD_WHITE, { size: rSize, weight: 600 });
   }
   if (fr.timerPaused) {
     screenText(ctx, 'Timer paused', sx + 2, sy + size * 3 + 22, w, mirrored, HUD_AMBER, { size: size - 2, weight: 700 });
@@ -175,61 +251,71 @@ export function drawActivityBadge(ctx, fr, w, h, mirrored, { reasonLabels = {}, 
 
 /** "Set X of Y · Rep N of M" (top-right). */
 export function drawCounters(ctx, fr, w, h, mirrored) {
-  const size = fontPx(h, 1.05);
   const setPart = fr.targetSets > 0 ? `Set ${fr.currentSet} of ${fr.targetSets}` : `Set ${fr.currentSet}`;
   const repPart = fr.targetReps > 0 ? `Rep ${fr.setRepCount} of ${fr.targetReps}` : `Rep ${fr.setRepCount}`;
   const text = `${setPart} · ${repPart}`;
+  const size = fitText(ctx, text, fontPx(h, 1.05, w), 800, w / 2 - 14 - 20).size;
   const tw = measure(ctx, text, size, 800);
   const sx = w - 14 - tw - 20;
   screenBox(ctx, sx, 12, tw + 20, size + 14, w, mirrored, HUD_PANEL);
   screenText(ctx, text, sx + 10, 12 + size + 4, w, mirrored, HUD_WHITE, { size, weight: 800 });
 }
 
-/** Banner (rep / set events), mistake box, and the bottom status line. */
+/**
+ * Bottom-anchored text stack, so nothing covers the face: status line at the
+ * very bottom, the mistake box above it, the rep / set banner above that.
+ * Every box word-wraps to the frame width.
+ */
 export function drawFeedback(ctx, fr, w, h, mirrored) {
-  const size = fontPx(h, 1.0);
   const banner = fr.banner;
   const mistake = fr.mistake;
   const feedback = fr.feedback && fr.feedback !== mistake ? fr.feedback : '';
   const text = feedback || fr.status || '';
-  const cx = w / 2;
+  const margin = hudMargin(w, h);
+  const gap = Math.max(4, Math.round(margin * 0.5));
 
-  if (banner) {
-    const bSize = fontPx(h, 1.5);
-    const tw = measure(ctx, banner, bSize, 800);
-    screenBox(ctx, cx - tw / 2 - 14, h * 0.2 - bSize, tw + 28, bSize + 18, w, mirrored, 'rgba(0,0,0,0.55)');
-    screenText(ctx, banner, cx, h * 0.2 + 4, w, mirrored, HUD_WHITE, { size: bSize, weight: 800, align: 'center' });
+  let bottom = h - margin;
+  if (text) {
+    const warn = fr.statusKind === 'warn' || fr.statusKind === 'fail' || fr.sustainedCues?.length;
+    bottom = drawTextBox(ctx, text, bottom, w, h, mirrored, {
+      size: fontPx(h, 1.0, w), weight: 700, color: warn ? HUD_AMBER : HUD_WHITE, maxLines: 2,
+    }) - gap;
   }
-  if (mistake) drawMistake(ctx, mistake, w, h, mirrored);
-  if (!text) return;
-  const warn = fr.statusKind === 'warn' || fr.statusKind === 'fail' || fr.sustainedCues?.length;
-  const tw = measure(ctx, text, size, 700);
-  const y = h - 24;
-  screenBox(ctx, cx - tw / 2 - 12, y - size - 6, tw + 24, size + 16, w, mirrored, HUD_PANEL);
-  screenText(ctx, text, cx, y, w, mirrored, warn ? HUD_AMBER : HUD_WHITE, { size, weight: 700, align: 'center' });
+  if (mistake) bottom = drawMistake(ctx, mistake, w, h, mirrored, bottom) - gap;
+  if (banner) {
+    drawTextBox(ctx, banner, bottom, w, h, mirrored, {
+      size: fontPx(h, 1.3, w), weight: 800, fill: 'rgba(0,0,0,0.55)', maxLines: 2,
+    });
+  }
 }
 
-export function drawMistake(ctx, text, w, h, mirrored) {
-  const size = fontPx(h, 1.25);
-  const msg = `⚠ ${text}`;
-  const tw = Math.min(measure(ctx, msg, size, 800), w - 60);
-  const bx = w / 2 - tw / 2 - 16;
-  const by = h * 0.3 - size;
-  const bh = size + 22;
-  screenBox(ctx, bx - 3, by - 3, tw + 38, bh + 6, w, mirrored, HUD_RED);
-  screenBox(ctx, bx, by, tw + 32, bh, w, mirrored, 'rgba(90,0,0,0.88)');
-  screenText(ctx, msg, w / 2, by + size + 6, w, mirrored, HUD_WHITE, { size, weight: 800, align: 'center' });
+/**
+ * Red mistake box, centred, bottom edge at `bottomY` (default: frame bottom).
+ * @returns {number} y of the box's top edge
+ */
+export function drawMistake(ctx, text, w, h, mirrored, bottomY = h - hudMargin(w, h)) {
+  return drawTextBox(ctx, `⚠ ${text}`, bottomY, w, h, mirrored, {
+    size: fontPx(h, 1.2, w), weight: 800, fill: 'rgba(90,0,0,0.85)', border: HUD_RED, maxLines: 3,
+  });
 }
 
 export function drawRestOverlay(ctx, fr, w, h, mirrored) {
-  const size = fontPx(h, 1.6);
+  const margin = hudMargin(w, h);
   const done = fr.setsCompleted;
-  screenBox(ctx, 0, h * 0.35, w, size * 3 + 20, w, mirrored, 'rgba(0,0,0,0.5)');
-  screenText(ctx, `Set ${done} complete`, w / 2, h * 0.35 + size + 8, w, mirrored, HUD_GREEN, { size, weight: 800, align: 'center' });
+  const title = `Set ${done} complete`;
   const sub = fr.restRemainingSec > 0
     ? `Rest ${fr.restRemainingSec}s — or press Start Next Set`
     : 'Stand in your stance, arms down, to begin';
-  screenText(ctx, sub, w / 2, h * 0.35 + size * 2 + 14, w, mirrored, HUD_WHITE, { size: Math.round(size * 0.55), weight: 600, align: 'center' });
+  const size = fitText(ctx, title, fontPx(h, 1.6, w), 800, w - 2 * margin).size;
+  const sub1 = fitText(ctx, sub, Math.round(size * 0.55), 600, w - 2 * margin, 2);
+  const subH = Math.round(sub1.size * 1.25);
+  screenBox(ctx, 0, h * 0.35, w, size + 14 + subH * sub1.lines.length + 16, w, mirrored, 'rgba(0,0,0,0.5)');
+  screenText(ctx, title, w / 2, h * 0.35 + size + 8, w, mirrored, HUD_GREEN, { size, weight: 800, align: 'center' });
+  sub1.lines.forEach((ln, i) => {
+    screenText(ctx, ln, w / 2, h * 0.35 + size + 14 + (i + 1) * subH, w, mirrored, HUD_WHITE, {
+      size: sub1.size, weight: 600, align: 'center',
+    });
+  });
 }
 
 /** Monospace-ish debug box (bottom-left) with one text row per line. */

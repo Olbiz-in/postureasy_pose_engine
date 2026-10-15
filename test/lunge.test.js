@@ -8,6 +8,7 @@ import { LUNGE_STATE } from '../src/exercises/lunge/LungeRepTracker.js';
 import {
   LUNGE_CFG, LUNGE_FEEDBACK, LUNGE_COLOR_RED, resetLungeCfg,
 } from '../src/exercises/lunge/config.js';
+import { shinTiltDeg } from '../src/exercises/lunge/poseChecks.js';
 import { Driver, makePose, depthAt, noise, W, H, FPS } from './support/lungePose.js';
 
 // ── Fake TTS: record everything that would be spoken ─────────────────────────
@@ -337,19 +338,20 @@ describe('repeated-mistake rule (two consecutive completed reps)', () => {
   const hip = (d) => (d > 0.05 ? { hipShift: 0.45 } : {});
   const warnings = (flow) => flow.repTracker.attempts.map((a) => a.warning ?? null);
 
-  test('first occurrence is recorded and shown red, but not warned; second triggers the warning', () => {
+  test('first occurrence is recorded but not marked or warned; second triggers the warning', () => {
     const { flow, d } = setup('front');
     const rep1 = d.rep({ pose: kneeLeft });
     assert.deepEqual(lastRep(flow).issues, ['lunge_knee_collapse_left']);
     assert.equal(lastRep(flow).warning, null);
-    assert.ok(rep1.some((f) => f.boneColor === LUNGE_COLOR_RED), 'red indicator is live even before the warning');
-    assert.ok(rep1.some((f) => f.redJoints.includes(LM.LEFT_KNEE)));
+    assert.ok(rep1.some((f) => f.boneColor === LUNGE_COLOR_RED), 'red skeleton is live even before the warning');
+    assert.equal(rep1.some((f) => f.redJoints.includes(LM.LEFT_KNEE)), false, 'no joint marker on the first occurrence');
     assert.equal(rep1.some((f) => f.mistake), false, 'no corrective text on the first occurrence');
     assert.deepEqual(corrections(), []);
 
     const rep2 = d.rep({ pose: kneeLeft });
     assert.equal(lastRep(flow).warning, 'lunge_knee_collapse_left');
     assert.ok(rep2.some((f) => f.mistake === LUNGE_FEEDBACK.lunge_knee_collapse_left));
+    assert.ok(rep2.some((f) => f.redJoints.includes(LM.LEFT_KNEE)), 'joint marked once the mistake repeats');
     assert.deepEqual(corrections(), [LUNGE_FEEDBACK.lunge_knee_collapse_left], 'spoken exactly once');
   });
 
@@ -422,16 +424,60 @@ describe('repeated-mistake rule (two consecutive completed reps)', () => {
     assert.deepEqual(lastRep(flow).issues, ['lunge_trunk_sway']);
   });
 
-  test('side: excessive forward lean is flagged, normal lean is not', () => {
+  test('side: forward lean beyond the tolerance is flagged, a slight lean is not', () => {
     const { flow, d } = setup('side');
-    d.rep({ pose: (x) => (x > 0.05 ? { leanPx: 45 } : {}) }); // ~21°, normal
+    d.rep({ pose: (x) => (x > 0.05 ? { leanPx: 20 } : {}) }); // ~9°, within tolerance
     assert.deepEqual(lastRep(flow).issues, []);
-    d.rep({ pose: (x) => (x > 0.05 ? { leanPx: 115 } : {}) }); // ~44°
+    d.rep({ pose: (x) => (x > 0.05 ? { leanPx: 60 } : {}) }); // ~26°
     assert.deepEqual(lastRep(flow).issues, ['lunge_torso_lean']);
     assert.equal(lastRep(flow).warning, null);
-    d.rep({ pose: (x) => (x > 0.05 ? { leanPx: 115 } : {}) });
+    d.rep({ pose: (x) => (x > 0.05 ? { leanPx: 60 } : {}) });
     assert.equal(lastRep(flow).warning, 'lunge_torso_lean');
-    assert.ok(lastRep(flow).metrics.torsoLeanDeg >= 35);
+    assert.ok(lastRep(flow).metrics.torsoLeanDeg >= LUNGE_CFG.torso_lean_max_deg);
+  });
+
+  test('side: leaning back is flagged too', () => {
+    const { flow, d } = setup('side');
+    d.rep({ pose: (x) => (x > 0.05 ? { leanPx: -60 } : {}) });
+    assert.deepEqual(lastRep(flow).issues, ['lunge_torso_lean_back']);
+    assert.ok(lastRep(flow).metrics.torsoLeanBackDeg >= LUNGE_CFG.torso_lean_max_deg);
+    assert.ok(lastRep(flow).components.torso < 100);
+  });
+
+  test('side: front shin tilted past the tolerance is flagged on the front leg only', () => {
+    const { flow, d } = setup('side');
+    d.rep({ lead: 'left', pose: () => ({ shinPx: 50 }) }); // ~26° knee ahead of ankle
+    assert.ok(lastRep(flow).issues.includes('lunge_front_shin'));
+    assert.ok(lastRep(flow).metrics.frontShinDeg > LUNGE_CFG.shin_vertical_max_deg);
+    assert.ok(lastRep(flow).components.shin < 100);
+    const red = d.frames.filter((f) => f.sustainedCues.includes('lunge_front_shin'));
+    assert.ok(red.length > 0);
+
+    d.rep({ lead: 'right', pose: () => ({ shinPx: 50 }) });
+    assert.equal(flow.repTracker.count, 2);
+    assert.equal(lastRep(flow).frontLeg, 'right');
+    assert.ok(lastRep(flow).issues.includes('lunge_front_shin'));
+    assert.equal(lastRep(flow).warning, 'lunge_front_shin');
+    const done = d.frames.filter((f) => f.repCompleted).pop();
+    assert.deepEqual(done.redJoints.sort(), [LM.RIGHT_KNEE, LM.RIGHT_ANKLE].sort());
+  });
+
+  test('shinTiltDeg: + knee ahead of the ankle, − behind it, 0 vertical', () => {
+    const ankle = { x: 100, y: 200 };
+    assert.equal(shinTiltDeg({ ankle, knee: { x: 100, y: 100 } }, 1), 0);
+    assert.ok(Math.abs(shinTiltDeg({ ankle, knee: { x: 200, y: 100 } }, 1) - 45) < 1e-9);
+    assert.ok(Math.abs(shinTiltDeg({ ankle, knee: { x: 0, y: 100 } }, 1) + 45) < 1e-9);
+    assert.ok(Math.abs(shinTiltDeg({ ankle, knee: { x: 0, y: 100 } }, -1) - 45) < 1e-9);
+    assert.equal(shinTiltDeg({ ankle, knee: null }, 1), null);
+  });
+
+  test('side: a slight shin tilt within the tolerance is fine, and the tolerance is adjustable', () => {
+    const { flow, d } = setup('side');
+    d.rep({ pose: () => ({ shinPx: 20 }) }); // ~11°
+    assert.ok(!lastRep(flow).issues.includes('lunge_front_shin'));
+    LUNGE_CFG.shin_vertical_max_deg = 30;
+    d.rep({ pose: () => ({ shinPx: 50 }) });
+    assert.ok(!lastRep(flow).issues.includes('lunge_front_shin'));
   });
 
   test('a single noisy frame never flags a mistake', () => {

@@ -25,7 +25,24 @@ export const LM = {
 };
 
 /** Monotonic clock in seconds, matching the original engine's timing base. */
-export const nowSec = () => (typeof performance !== 'undefined' ? performance.now() : Date.now()) / 1000;
+const rawMs = () => (typeof performance !== 'undefined' ? performance.now() : Date.now());
+let clockPausedMs = 0;
+let clockPausedAt = -1;
+
+/**
+ * Engine clock (seconds). Stands still while paused (uploaded video paused),
+ * so rep timing, idle detection and rest timers skip the paused time.
+ */
+export const nowSec = () => ((clockPausedAt >= 0 ? clockPausedAt : rawMs()) - clockPausedMs) / 1000;
+
+export function setEngineClockPaused(paused) {
+  if (paused && clockPausedAt < 0) {
+    clockPausedAt = rawMs();
+  } else if (!paused && clockPausedAt >= 0) {
+    clockPausedMs += rawMs() - clockPausedAt;
+    clockPausedAt = -1;
+  }
+}
 
 /** True when a landmark exists and clears the visibility threshold. */
 export function isVisible(lm, minVisibility = 0.5) {

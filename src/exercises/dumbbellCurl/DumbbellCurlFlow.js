@@ -21,7 +21,7 @@
 import { VoiceManager } from '../../core/voiceManager.js';
 import { nowSec } from '../../core/landmarks.js';
 import {
-  DC_CFG, DC_FEEDBACK, DC_VOICE_MSG, DC_STANCE_PRIORITY, DC_LIVE_PRIORITY, DC_TRACKED_LANDMARKS,
+  DC_CFG, DC_FEEDBACK, DC_VOICE_MSG, DC_STANCE_PRIORITY, DC_ISSUE_PRIORITY, DC_LIVE_PRIORITY, DC_TRACKED_LANDMARKS,
   DC_COLOR_GREEN, DC_COLOR_AMBER, DC_COLOR_RED, DC_COLOR_GREY,
 } from './config.js';
 import { LandmarkSmoother } from '../common/landmarkSmoother.js';
@@ -86,7 +86,9 @@ export class DumbbellCurlFlow {
     this._lastTickAt = -1;
 
     this._cueOnset = new Map();
-    this._mistakeGate = new RepeatMistakeGate();
+    this._mistakeGate = new RepeatMistakeGate({
+      pick: (k) => firstByPriority(k, [...DC_ISSUE_PRIORITY, ...DC_LIVE_PRIORITY]),
+    });
     this._mistake = '';
     this._mistakeUntil = -1;
     this._feedback = '';

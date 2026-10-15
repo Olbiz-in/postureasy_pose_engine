@@ -3,18 +3,19 @@
 // Each arm runs its own line-based cycle (no angles):
 //   WAIT_DOWN → arm must first be in the start zone (after start / abort)
 //   DOWN      → resting; leaves when the elbow lift reaches `lift_start`
-//   UP        → rising / at the top; TOP is reached ("half rep") when the elbow
-//               crosses the LOWER line (`top_tolerance` below the shoulder
-//               line); the cycle ends once elbow AND wrist drop back under
-//               `lift_return`
+//   UP        → rising / at the top; TOP is reached when the elbow AND the
+//               wrist have both crossed the LOWER line (`top_tolerance` below
+//               the shoulder line); the cycle ends once elbow AND wrist drop
+//               back under `lift_return`
 //
 // The two arm cycles are paired into one attempt, and every attempt is a
 // counted rep — partial range of motion included. A rep is "clean" only when
-// both elbows land inside the band: past the LOWER line, never above the
-// UPPER line (`elbow_above_tolerance`). Every attempt gets a weighted 0–100 score.
+// both elbows AND both wrists land inside the band: past the LOWER line (else
+// it is a half rep), never above the UPPER line (`elbow_above_tolerance`;
+// above it = overshoot, an injury risk). Every attempt gets a weighted 0–100 score.
 
 import { LR_CFG, LR_SCORE_WEIGHTS, LR_ISSUE_PRIORITY } from './config';
-import { armLift } from './poseChecks';
+import { armLift, armLevelDiff } from './poseChecks';
 import { clamp01, ramp, round2, avg, firstByPriority } from '../common/math';
 
 const SIDES = ['left', 'right'];
@@ -30,10 +31,13 @@ function newCycle(side, now) {
     endAt: -1,
     topAt: -1,
     reachedTop: false,
+    elbowTop: false,
+    wristTop: false,
     peakLift: 0,
     minElbowDy: Infinity,
     minWristDy: Infinity,
     elbowAboveSec: 0,
+    wristAboveSec: 0,
     lost: false,
     partial: false,
     consumed: false,
@@ -88,14 +92,47 @@ export class LateralRaiseRepTracker {
 
   _openWindow(g, now) {
     if (this._window) return;
-    this._window = { startAt: now, maxTilt: 0 };
+    this._window = {
+      startAt: now,
+      maxTilt: 0,
+      maxLevelRatio: 0,
+      unevenSec: 0,
+      soloSince: -1, // one arm moving while the other is still down
+      maxSoloSec: 0,
+    };
   }
 
-  _updateWindow(g, calib) {
+  /** @returns {string[]} live symmetry keys for this frame */
+  _updateWindow(g, calib, now, dt) {
     const w = this._window;
-    if (!w) return;
+    if (!w) return [];
+    const keys = [];
     const tilt = Math.abs(g.tilt - (calib?.tilt0 ?? 0));
     w.maxTilt = Math.max(w.maxTilt, tilt);
+
+    // Timing: exactly one arm in its UP cycle = that side started / finished alone.
+    const up = SIDES.filter((s) => this._arms[s].state === 'UP');
+    const solo = up.length === 1;
+    if (solo) {
+      if (w.soloSince < 0) w.soloSince = now;
+      const soloSec = now - w.soloSince;
+      w.maxSoloSec = Math.max(w.maxSoloSec, soloSec);
+      if (soloSec > LR_CFG.sync_max_sec) keys.push('lr_arms_out_of_sync');
+    } else {
+      w.soloSince = -1;
+    }
+
+    // Height evenness while both arms move: elbows level with each other,
+    // wrists level with each other. (A late arm is reported as timing above.)
+    const { ratio } = armLevelDiff(g);
+    if (ratio != null && !solo) {
+      w.maxLevelRatio = Math.max(w.maxLevelRatio, ratio);
+      if (ratio > 1) {
+        w.unevenSec += dt;
+        keys.push('lr_asymmetry');
+      }
+    }
+    return keys;
   }
 
   _stepArm(side, a, g, calib, now, dt) {
@@ -139,7 +176,9 @@ export class LateralRaiseRepTracker {
     c.peakLift = Math.max(c.peakLift, lift.elbow);
     c.minElbowDy = Math.min(c.minElbowDy, a.elbowDy);
     c.minWristDy = Math.min(c.minWristDy, a.wristDy);
-    if (!c.reachedTop && a.elbowDy <= LR_CFG.top_tolerance) {
+    if (a.elbowDy <= LR_CFG.top_tolerance) c.elbowTop = true;
+    if (a.wristDy <= LR_CFG.top_tolerance) c.wristTop = true;
+    if (!c.reachedTop && c.elbowTop && c.wristTop) {
       c.reachedTop = true;
       c.topAt = now;
       res.top = true;
@@ -147,6 +186,10 @@ export class LateralRaiseRepTracker {
     if (-a.elbowDy > LR_CFG.elbow_above_tolerance) {
       c.elbowAboveSec += dt;
       res.liveKeys.push('lr_elbow_too_high');
+    }
+    if (-a.wristDy > LR_CFG.elbow_above_tolerance) {
+      c.wristAboveSec += dt;
+      res.liveKeys.push('lr_wrist_too_high');
     }
 
     if (inStartZone) {
@@ -180,7 +223,7 @@ export class LateralRaiseRepTracker {
       r.liveKeys.forEach((k) => liveKeys.add(k));
       if (r.done) this._onCycleDone(r.done, now);
     }
-    this._updateWindow(g, calib);
+    this._updateWindow(g, calib, now, dt).forEach((k) => liveKeys.add(k));
 
     let attempt = null;
     const p = this._pending;
@@ -208,21 +251,31 @@ export class LateralRaiseRepTracker {
   _armResult(c, calib) {
     if (!c) return null;
     const restE = calib?.restElbow?.[c.side] ?? LR_CFG.rest_elbow_default;
+    const restW = calib?.restWrist?.[c.side] ?? LR_CFG.rest_wrist_default;
     const tol = LR_CFG.top_tolerance;
-    const reach = c.minElbowDy <= tol ? 1 : clamp01((restE - c.minElbowDy) / Math.max(restE - tol, 0.1));
+    const reachOf = (minDy, rest) => (minDy <= tol ? 1 : clamp01((rest - minDy) / Math.max(rest - tol, 0.1)));
+    // The rep is only as complete as the lower of the two joints.
+    const reach = Math.min(reachOf(c.minElbowDy, restE), reachOf(c.minWristDy, restW));
     const maxElbowAbove = Math.max(0, -c.minElbowDy);
-    const overshoot = ramp(maxElbowAbove, LR_CFG.elbow_above_tolerance, LR_CFG.elbow_above_zero_at);
+    const maxWristAbove = Math.max(0, -c.minWristDy);
+    const overshoot = ramp(
+      Math.max(maxElbowAbove, maxWristAbove), LR_CFG.elbow_above_tolerance, LR_CFG.elbow_above_zero_at,
+    );
     return {
       side: c.side,
       reachedTop: c.reachedTop && !c.lost,
+      elbowReachedTop: c.elbowTop && !c.lost,
+      wristReachedTop: c.wristTop && !c.lost,
       complete: !c.partial && !c.lost,
       lost: c.lost,
       peakElbowDy: round2(c.minElbowDy),
       peakWristDy: round2(c.minWristDy),
       maxElbowAbove,
+      maxWristAbove,
       romPct: reach * 100,
       romScore: Math.max(0, reach * 100 - 50 * overshoot),
       elbowTooHigh: c.elbowAboveSec >= LR_CFG.flag_min_sec,
+      wristTooHigh: c.wristAboveSec >= LR_CFG.flag_min_sec,
       topAt: c.topAt,
       endAt: c.endAt,
     };
@@ -244,18 +297,35 @@ export class LateralRaiseRepTracker {
       const anyTop = arms.some((a) => a.reachedTop);
       issues.add(anyTop || arms.length < 2 || arms.some((a) => a.lost) ? 'lr_incomplete' : 'lr_not_high_enough');
     }
-    if (arms.some((a) => !a.reachedTop)) issues.add('lr_not_high_enough');
+    if (arms.some((a) => !a.elbowReachedTop)) issues.add('lr_not_high_enough');
+    // Elbow made it into the band but the wrist stayed below it → half rep.
+    if (arms.some((a) => a.elbowReachedTop && !a.wristReachedTop)) {
+      issues.add('lr_wrist_not_high_enough');
+      if (!arms.some((a) => !a.elbowReachedTop)) issues.delete('lr_not_high_enough');
+    }
     if (arms.some((a) => a.elbowTooHigh)) issues.add('lr_elbow_too_high');
+    if (arms.some((a) => a.wristTooHigh)) issues.add('lr_wrist_too_high');
 
     const symDiff = L && R ? Math.abs(p.left.minElbowDy - p.right.minElbowDy) : null;
     if (symDiff != null && symDiff > LR_CFG.symmetry_max) issues.add('lr_asymmetry');
+    if ((win?.unevenSec ?? 0) >= LR_CFG.symmetry_min_sec) issues.add('lr_asymmetry');
+    // Start / finish lag between the two arms.
+    const lagSec = L && R && p.left && p.right
+      ? Math.max(Math.abs(p.left.startAt - p.right.startAt), win?.maxSoloSec ?? 0)
+      : null;
+    if (lagSec != null && lagSec > LR_CFG.sync_max_sec) issues.add('lr_arms_out_of_sync');
     const tilt = win?.maxTilt ?? 0;
     if (tilt > LR_CFG.shoulder_tilt_max) issues.add('lr_shoulder_tilt');
 
     // ── Component scores (0–100) ────────────────────────────────────────────
     const romPct = ((L?.romPct ?? 0) + (R?.romPct ?? 0)) / 2;
     const romScore = ((L?.romScore ?? 0) + (R?.romScore ?? 0)) / 2;
-    const symmetryPct = symDiff == null ? 0 : 100 * (1 - ramp(symDiff, 0, LR_CFG.symmetry_zero_at));
+    const levelRatio = win?.maxLevelRatio ?? 0;
+    const symmetryPct = symDiff == null ? 0 : 100 * Math.min(
+      1 - ramp(symDiff, 0, LR_CFG.symmetry_zero_at),
+      1 - ramp(levelRatio, 1, LR_CFG.symmetry_zero_at / LR_CFG.symmetry_max),
+      1 - ramp(lagSec ?? 0, LR_CFG.sync_max_sec, LR_CFG.sync_zero_at_sec),
+    );
     const stabilityPct = 100 * (1 - ramp(tilt, LR_CFG.shoulder_tilt_max, LR_CFG.shoulder_tilt_zero_at));
 
     const W = LR_SCORE_WEIGHTS;
@@ -270,6 +340,7 @@ export class LateralRaiseRepTracker {
     const clean = fullRom
       && score >= LR_CFG.clean_score_min
       && !issues.has('lr_elbow_too_high')
+      && !issues.has('lr_wrist_too_high')
       && !issues.has('lr_incomplete');
 
     this.count += 1;
@@ -296,6 +367,8 @@ export class LateralRaiseRepTracker {
       primaryIssue: selectPrimaryIssue(keys),
       shoulderTilt: Math.round(tilt * 100) / 100,
       symmetryDiff: symDiff == null ? null : Math.round(symDiff * 100) / 100,
+      maxLevelRatio: round2(levelRatio),
+      syncLagSec: lagSec == null ? null : round2(lagSec),
       left: L,
       right: R,
       durationSec: Math.round(Math.max(0, now - startAt) * 100) / 100,
@@ -356,9 +429,12 @@ export function summarizeLateralRaise(attempts, {
     avgRepSec: counted.length ? Math.round(avg(counted.map((a) => a.durationSec)) * 10) / 10 : null,
     mistakes: {
       elbowTooHigh: has('lr_elbow_too_high'),
+      wristTooHigh: has('lr_wrist_too_high'),
       notHighEnough: has('lr_not_high_enough'),
+      wristNotHighEnough: has('lr_wrist_not_high_enough'),
       incomplete: has('lr_incomplete'),
       asymmetry: has('lr_asymmetry'),
+      outOfSync: has('lr_arms_out_of_sync'),
       shoulderTilt: has('lr_shoulder_tilt'),
     },
     perRep: list.map((a) => ({

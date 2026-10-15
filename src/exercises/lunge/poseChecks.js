@@ -168,12 +168,22 @@ function legKneeDeg(l) {
   return jointAngle(l.hip, l.knee, l.ankle);
 }
 
+/** Shin (ankle → knee) tilt from vertical in degrees (+ = knee ahead of the ankle). */
+export function shinTiltDeg(l, dir) {
+  if (!l?.knee || !l?.ankle || !dir) return null;
+  const forward = (l.knee.x - l.ankle.x) * dir;
+  const up = l.ankle.y - l.knee.y;
+  if (up <= 0) return null;
+  return deg(Math.atan2(forward, up));
+}
+
 export function sideMeasures(g, calib) {
   const dir = calib?.dir || facingSign(g);
   const lean = torsoLeanDeg(g, dir);
   return {
     leanDeg: lean == null ? null : lean - (calib?.lean0 ?? 0),
     kneeDeg: { left: legKneeDeg(g.legs.left), right: legKneeDeg(g.legs.right) },
+    shinDeg: { left: shinTiltDeg(g.legs.left, dir), right: shinTiltDeg(g.legs.right, dir) },
   };
 }
 

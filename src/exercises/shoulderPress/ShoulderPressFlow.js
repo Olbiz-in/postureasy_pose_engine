@@ -105,7 +105,7 @@ export class ShoulderPressFlow {
     this._readyStart = -1;
     this._doRepOneVoiceSent = false;
     this._cueOnset = new Map();
-    this._mistakeGate = new RepeatMistakeGate();
+    this._mistakeGate = new RepeatMistakeGate({ pick: selectPrimaryError });
     this._lastLiveCueAt = -1;
     this._lastInstructionKey = '';
     this._lastInstructionAt = -1;
@@ -483,8 +483,8 @@ export class ShoulderPressFlow {
     this._mistakeGate.track(rep.state !== 'WAITING');
     const liveKeys = [...(posture?.cueKeys || []), res.liveDepthCue].filter(Boolean);
     const sustained = inPress ? this._sustained(liveKeys, now) : this._sustained([], now);
+    const shownEvent = this._mistakeGate.claim(res.event) ? res.event : null;
     const shownSustained = this._mistakeGate.filter(sustained);
-    const shownEvent = this._mistakeGate.allows(res.event) ? res.event : null;
 
     let feedbackText = '';
 

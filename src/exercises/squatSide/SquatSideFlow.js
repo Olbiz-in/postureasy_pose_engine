@@ -413,7 +413,7 @@ export class SquatSideFlow {
         feedbackKey = 'calibrate';
         this._activeFeedback = feedbackText;
         this._speak(VOICE_MSG.calibrate, { key: 'side_calibrate', cooldownMs: VOICE_CD_MS });
-      } else if (sq.tooDeep && this._mistakeGate.allows(VOICE_MSG.too_deep)) {
+      } else if (sq.tooDeep && this._mistakeGate.claim(VOICE_MSG.too_deep)) {
         feedbackText = VOICE_MSG.too_deep;
         feedbackKey = 'too_deep';
       } else {
@@ -426,7 +426,7 @@ export class SquatSideFlow {
             feedbackText = VOICE_MSG.too_slow;
             feedbackKey = 'too_slow';
           }
-          if (!this._mistakeGate.allows(feedbackText)) {
+          if (!this._mistakeGate.claim(feedbackText)) {
             feedbackText = '';
             feedbackKey = '';
           }

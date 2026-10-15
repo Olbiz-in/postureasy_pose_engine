@@ -54,8 +54,9 @@ export const LR_CFG_DEFAULTS = {
   arms_down_below_shoulder_min: 0.9, // …or at least this far below the shoulder line
   // ── Shoulder line / rep detection ────────────────────────────────────────
   line_mode: 'average', // 'average' (one line, both shoulders) | 'per_side'
-  // Target band around the shoulder line: a perfect rep puts the elbow
-  // between the LOWER line (reached the top) and the UPPER line (not too high).
+  // Target band around the shoulder line: a perfect rep puts BOTH the elbow
+  // and the wrist between the LOWER line (reached the top) and the UPPER line
+  // (not too high). The same two tolerances apply to elbow and wrist.
   top_tolerance: 0.10, // LOWER line: this far BELOW the shoulder line
   elbow_above_tolerance: 0.12, // UPPER line: this far ABOVE the shoulder line
   // Fixed rep-cycle internals (not user tunable).
@@ -72,10 +73,21 @@ export const LR_CFG_DEFAULTS = {
   // ── Form rules ───────────────────────────────────────────────────────────
   flag_min_sec: 0.12, // a fault must persist this long inside a rep to count
   shoulder_tilt_max: 0.10, // |Δ shoulder y| / sw vs calibrated baseline
-  symmetry_max: 0.15, // |left − right peak elbow height| / sw
+  // Both arms must rise evenly: at every moment of the rep the left and right
+  // elbows must be within `symmetry_max` height of each other (/ sw), and the
+  // left and right wrists within `symmetry_wrist_max`. The wrist sits ~2× as far
+  // from the shoulder, so the same arm-angle gap moves it ~2× as much.
+  // `symmetry_max` is also checked on the peak elbow heights.
+  symmetry_max: 0.15,
+  symmetry_wrist_max: 0.25,
+  symmetry_min_sec: 0.25, // uneven this long inside a rep → flagged
+  // Both arms must start (and finish) together: one arm moving alone for
+  // longer than this means one side started / finished late.
+  sync_max_sec: 0.35,
+  sync_zero_at_sec: 1.2, // timing component of the symmetry score reaches 0 here
 
   // Where each component score reaches 0 (linear ramp from its tolerance).
-  elbow_above_zero_at: 0.40,
+  elbow_above_zero_at: 0.40, // also used for the wrist overshoot
   shoulder_tilt_zero_at: 0.30,
   symmetry_zero_at: 0.40,
   clean_score_min: 75,
@@ -125,7 +137,10 @@ export function resetLateralRaiseWeights() {
 export const LR_ISSUE_PRIORITY = [
   'lr_incomplete',
   'lr_not_high_enough',
+  'lr_wrist_not_high_enough',
   'lr_elbow_too_high',
+  'lr_wrist_too_high',
+  'lr_arms_out_of_sync',
   'lr_asymmetry',
   'lr_shoulder_tilt',
 ];
@@ -152,7 +167,10 @@ export const LR_FEEDBACK = {
   lr_incomplete: 'Incomplete rep — raise both arms together',
   lr_not_high_enough: 'Raise your elbows up to the shoulder line',
   lr_elbow_too_high: 'Elbows too high — stop at shoulder level',
-  lr_asymmetry: 'Raise both arms to the same height',
+  lr_wrist_not_high_enough: 'Half rep — raise your wrists up to the shoulder line',
+  lr_wrist_too_high: 'Wrists too high — keep them at shoulder level',
+  lr_asymmetry: 'Uneven arms — keep both elbows and wrists level',
+  lr_arms_out_of_sync: 'Raise and lower both arms together — one side is late',
   lr_shoulder_tilt: 'Keep your shoulders level — don\'t shrug',
   lr_turned_away: 'Turned away',
   lr_arms_resting: 'Arms resting',

@@ -80,8 +80,14 @@ export const LUNGE_CFG_DEFAULTS = {
   pelvis_tilt_zero_at: 0.38,
   trunk_sway_max: 0.22, // |Δ shoulder-over-hip lateral offset| / torso
   trunk_sway_zero_at: 0.55,
-  torso_lean_max_deg: 35, // forward inclination beyond the standing baseline
-  torso_lean_zero_deg: 60,
+  // Side: the hip → shoulder line must stay vertical. Inclination beyond the
+  // standing baseline, either forward or back, more than this is a fault.
+  torso_lean_max_deg: 15,
+  torso_lean_zero_deg: 35,
+  // Side: on the way down the front shin (knee → ankle) must stay vertical —
+  // knee straight above the ankle. Tilt either way beyond this is a fault.
+  shin_vertical_max_deg: 15,
+  shin_vertical_zero_deg: 35,
   front_knee_good_deg: 110, // front-knee flexion this deep or deeper scores 100
   front_knee_zero_deg: 160,
   descent_min_sec: 0.6, // faster descent = uncontrolled drop
@@ -111,7 +117,7 @@ export function resetLungeCfg() {
 // instead of being scored as perfect).
 export const LUNGE_SCORE_WEIGHTS = {
   front: { depth: 20, knee: 25, hip: 15, pelvis: 10, balance: 15, tempo: 10, symmetry: 5 },
-  side: { depth: 25, kneeFlex: 15, torso: 25, balance: 15, tempo: 20 },
+  side: { depth: 20, kneeFlex: 10, shin: 20, torso: 20, balance: 15, tempo: 15 },
 };
 
 // Issue → score component.
@@ -123,6 +129,8 @@ export const LUNGE_ISSUE_GROUP = {
   lunge_trunk_sway: 'balance',
   lunge_unsteady: 'balance',
   lunge_torso_lean: 'torso',
+  lunge_torso_lean_back: 'torso',
+  lunge_front_shin: 'shin',
   lunge_shallow: 'depth',
   lunge_too_fast: 'tempo',
   lunge_asymmetry: 'symmetry',
@@ -132,7 +140,9 @@ export const LUNGE_ISSUE_GROUP = {
 export const LUNGE_ISSUE_PRIORITY = [
   'lunge_knee_collapse_left',
   'lunge_knee_collapse_right',
+  'lunge_front_shin',
   'lunge_torso_lean',
+  'lunge_torso_lean_back',
   'lunge_hip_shift',
   'lunge_pelvis_tilt',
   'lunge_trunk_sway',
@@ -170,6 +180,8 @@ export const LUNGE_FEEDBACK = {
   lunge_trunk_sway: 'Keep your torso stable — don\'t sway sideways.',
   lunge_unsteady: 'Maintain your balance.',
   lunge_torso_lean: 'Keep your torso stable — don\'t lean too far forward.',
+  lunge_torso_lean_back: 'Keep your torso upright — don\'t lean back.',
+  lunge_front_shin: 'Keep your front shin vertical — knee straight above the ankle.',
   lunge_shallow: 'Increase your lunge depth.',
   lunge_too_fast: 'Lower into the lunge with control.',
   lunge_asymmetry: 'Match your depth on both legs.',
@@ -198,6 +210,8 @@ export const LUNGE_VOICE_MSG = {
   lunge_trunk_sway: 'Keep your torso stable.',
   lunge_unsteady: 'Maintain your balance.',
   lunge_torso_lean: 'Keep your torso stable. Do not lean too far forward.',
+  lunge_torso_lean_back: 'Keep your torso upright. Do not lean back.',
+  lunge_front_shin: 'Keep your front shin vertical, knee above the ankle.',
   lunge_shallow: 'Increase your lunge depth.',
   lunge_too_fast: 'Lower into the lunge with control.',
   lunge_asymmetry: 'Match your depth on both legs.',
@@ -216,8 +230,15 @@ export const LUNGE_ISSUE_JOINTS = {
   lunge_pelvis_tilt: [LM.LEFT_HIP, LM.RIGHT_HIP],
   lunge_trunk_sway: [LM.LEFT_SHOULDER, LM.RIGHT_SHOULDER, LM.LEFT_HIP, LM.RIGHT_HIP],
   lunge_torso_lean: [LM.LEFT_SHOULDER, LM.RIGHT_SHOULDER, LM.LEFT_HIP, LM.RIGHT_HIP],
+  lunge_torso_lean_back: [LM.LEFT_SHOULDER, LM.RIGHT_SHOULDER, LM.LEFT_HIP, LM.RIGHT_HIP],
   lunge_unsteady: [LM.LEFT_ANKLE, LM.RIGHT_ANKLE],
   lunge_shallow: [LM.LEFT_HIP, LM.RIGHT_HIP],
   lunge_too_fast: [LM.LEFT_HIP, LM.RIGHT_HIP],
   lunge_asymmetry: [LM.LEFT_KNEE, LM.RIGHT_KNEE],
+};
+
+// lunge_front_shin highlights only the front leg, which changes per rep.
+export const LUNGE_LEG_JOINTS = {
+  left: [LM.LEFT_KNEE, LM.LEFT_ANKLE],
+  right: [LM.RIGHT_KNEE, LM.RIGHT_ANKLE],
 };

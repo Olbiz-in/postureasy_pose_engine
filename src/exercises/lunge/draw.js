@@ -8,10 +8,11 @@ import { LM } from '../../core/landmarks.js';
 import { LUNGE_CFG } from './config.js';
 import { LUNGE_PHASE } from './LungeFlow.js';
 import { LUNGE_STATE } from './LungeRepTracker.js';
+import { torsoLeanDeg, shinTiltDeg } from './poseChecks.js';
 import {
   HUD_CYAN as CYAN, HUD_GREEN as GREEN, HUD_RED as RED, HUD_AMBER as AMBER,
   HUD_GREY as GREY, HUD_WHITE as WHITE, HUD_PANEL as PANEL,
-  blink, line, dot, label, fontPx, measure, screenBox, screenText,
+  blink, line, dot, label, fontPx, fitText, measure, screenBox, screenText,
   drawStanceChecklist, drawFeedback, drawDebugRows,
 } from '../common/hud.js';
 
@@ -73,6 +74,73 @@ export function drawDepthGuide(ctx, fr, mirrored, h) {
   ctx.restore();
 }
 
+/**
+ * Tolerance wedge around a reference direction from `origin`: the allowed zone
+ * (centerDeg ± tolDeg from vertical, + = toward `dir`), its center line, and
+ * the measured segment origin → `tip`, green inside the zone and red outside.
+ */
+function drawAngleZone(ctx, origin, tip, dir, centerDeg, tolDeg, valueDeg, text, mirrored, size) {
+  const len = Math.max(Math.hypot(tip.x - origin.x, tip.y - origin.y) * 1.15, 20);
+  const at = (d) => {
+    const r = (d * Math.PI) / 180;
+    return { x: origin.x + dir * len * Math.sin(r), y: origin.y - len * Math.cos(r) };
+  };
+  const a = at(centerDeg - tolDeg);
+  const b = at(centerDeg + tolDeg);
+  const c = at(centerDeg);
+  const ok = valueDeg == null || Math.abs(valueDeg - centerDeg) <= tolDeg;
+
+  ctx.save();
+  ctx.fillStyle = ok ? 'rgba(0,255,80,0.12)' : 'rgba(255,40,40,0.16)';
+  ctx.beginPath();
+  ctx.moveTo(origin.x, origin.y);
+  ctx.lineTo(a.x, a.y);
+  ctx.lineTo(b.x, b.y);
+  ctx.closePath();
+  ctx.fill();
+
+  ctx.lineWidth = 1.5;
+  ctx.setLineDash([5, 4]);
+  ctx.strokeStyle = 'rgba(255,255,255,0.7)';
+  line(ctx, origin.x, origin.y, a.x, a.y);
+  line(ctx, origin.x, origin.y, b.x, b.y);
+  ctx.strokeStyle = CYAN;
+  line(ctx, origin.x, origin.y, c.x, c.y);
+  ctx.setLineDash([]);
+
+  ctx.lineWidth = 3;
+  ctx.strokeStyle = ok ? GREEN : blink();
+  line(ctx, origin.x, origin.y, tip.x, tip.y);
+  dot(ctx, tip.x, tip.y, 6, ok ? GREEN : RED);
+
+  const v = valueDeg == null ? '' : ` ${Math.round(Math.abs(valueDeg - centerDeg))}°/${Math.round(tolDeg)}°`;
+  label(ctx, `${text}${v}`, c.x + dir * 8, c.y - 4, mirrored, ok ? GREEN : RED, { size });
+  ctx.restore();
+}
+
+/** Side view: torso (hip → shoulder) and front shin (ankle → knee) vertical guides. */
+export function drawVerticalGuides(ctx, fr, mirrored, h) {
+  const g = fr.geometry;
+  const calib = fr.calib;
+  if (fr.view !== 'side' || !g || !calib?.dir) return;
+  const C = LUNGE_CFG;
+  const dir = calib.dir;
+  const size = Math.max(10, Math.round(h * 0.019));
+
+  if (g.refHip && g.refShoulder) {
+    const lean = torsoLeanDeg(g, dir);
+    const lean0 = calib.lean0 ?? 0;
+    drawAngleZone(ctx, g.refHip, g.refShoulder, dir, lean0, C.torso_lean_max_deg, lean, 'TORSO', mirrored, size);
+  }
+
+  const goingDown = fr.movement === LUNGE_STATE.DESCENDING || fr.movement === LUNGE_STATE.BOTTOM;
+  const leg = fr.frontLeg ? g.legs[fr.frontLeg] : null;
+  if (goingDown && leg?.knee && leg?.ankle) {
+    const shin = shinTiltDeg(leg, dir);
+    drawAngleZone(ctx, leg.ankle, leg.knee, dir, 0, C.shin_vertical_max_deg, shin, 'SHIN', mirrored, size);
+  }
+}
+
 /** Red markers on the joints of every sustained fault (visual indicator only). */
 export function drawFaultMarkers(ctx, fr) {
   const g = fr.geometry;
@@ -92,8 +160,8 @@ export function drawFaultMarkers(ctx, fr) {
 }
 
 function drawRepPanel(ctx, fr, w, h, mirrored) {
-  const size = fontPx(h, 1.05);
   const text = `Rep ${fr.repCount} · ${MOVEMENT_LABEL[fr.movement] || ''}`;
+  const size = fitText(ctx, text, fontPx(h, 1.05, w), 800, w - 2 * 14 - 20).size;
   const tw = measure(ctx, text, size, 800);
   const sx = w - 14 - tw - 20;
   screenBox(ctx, sx, 12, tw + 20, size + 14, w, mirrored, PANEL);
@@ -126,6 +194,7 @@ export function drawLungeOverlay(ctx, fr, frame) {
     drawStanceChecklist(ctx, fr, w, h, mirrored, { rows: SETUP_ROWS });
   } else {
     drawDepthGuide(ctx, fr, mirrored, h);
+    drawVerticalGuides(ctx, fr, mirrored, h);
     drawFaultMarkers(ctx, fr);
     drawRepPanel(ctx, fr, w, h, mirrored);
   }

@@ -14,6 +14,10 @@
 // `pair_window_sec` of each other; otherwise it is INCOMPLETE.
 // curl_mode 'alternate': every arm cycle is its own attempt.
 //
+// 'both' mode also checks that the arms move together: while a rep is in
+// progress the left / right curl progress gap must stay within
+// `arm_sync_tolerance`; a longer gap than `arm_sync_min_sec` is dc_arms_uneven.
+//
 // Body stability (sway, lean, shrug) is measured against the posture just
 // before the rep started, so stepping closer / farther between reps is fine.
 
@@ -48,6 +52,8 @@ function newCycle(side, now, progress) {
     maxElbowLift: 0,
     maxElbowFlare: 0,
     elbowSec: 0,
+    maxArmGap: 0,
+    unevenSec: 0,
     body: newBody(),
     partial: false,
     consumed: false,
@@ -292,6 +298,17 @@ export class DumbbellCurlRepTracker {
       if (body.sway > DC_CFG.sway_tolerance || body.lean > DC_CFG.lean_tolerance) liveKeys.add('dc_swinging');
       if (body.shrug > DC_CFG.shrug_tolerance) liveKeys.add('dc_shrugging');
       if (body.tilt > DC_CFG.shoulder_tilt_max) liveKeys.add('dc_shoulders_uneven');
+
+      if (this.mode === 'both' && progress.left != null && progress.right != null) {
+        const gap = Math.abs(clamp01(progress.left) - clamp01(progress.right));
+        const uneven = gap > DC_CFG.arm_sync_tolerance;
+        for (const s of upSides) {
+          const c = this._arms[s].cycle;
+          c.maxArmGap = Math.max(c.maxArmGap, gap);
+          if (uneven) c.unevenSec += dt;
+        }
+        if (uneven) liveKeys.add('dc_arms_uneven');
+      }
     }
 
     const attempts = [];
@@ -383,7 +400,7 @@ export class DumbbellCurlRepTracker {
     };
   }
 
-  _symmetry(arms, L, R, both) {
+  _symmetry(arms, L, R, both, armGap) {
     const hScore = (d) => 1 - ramp(d, 0, DC_CFG.symmetry_zero_at);
     if (both) {
       if (!L || !R) return { pct: 0, heightDiff: null, timingDiff: null };
@@ -393,7 +410,9 @@ export class DumbbellCurlRepTracker {
         : Math.abs(L.endAt - R.endAt);
       const tScore = 1 - ramp(timingDiff, DC_CFG.symmetry_timing_max_sec, DC_CFG.symmetry_timing_zero_at_sec);
       const tShare = clamp01(DC_CFG.symmetry_timing_share);
-      return { pct: 100 * ((1 - tShare) * hScore(heightDiff) + tShare * tScore), heightDiff, timingDiff };
+      const gapScore = 1 - ramp(armGap, DC_CFG.arm_sync_tolerance, DC_CFG.arm_sync_zero_at);
+      const pct = 100 * Math.min((1 - tShare) * hScore(heightDiff) + tShare * tScore, gapScore);
+      return { pct, heightDiff, timingDiff };
     }
     const a = arms[0];
     const otherPeak = this._lastPeak[OTHER[a.side]];
@@ -424,6 +443,10 @@ export class DumbbellCurlRepTracker {
     if (arms.some((a) => a.tooHigh)) issues.add('dc_too_high');
     if (arms.some((a) => a.elbowMoving)) issues.add('dc_elbow_moving');
 
+    const armGap = Math.max(...cycles.map((c) => c.maxArmGap));
+    const unevenSec = Math.max(...cycles.map((c) => c.unevenSec));
+    if (both && unevenSec >= DC_CFG.arm_sync_min_sec) issues.add('dc_arms_uneven');
+
     const body = mergeBodies(cycles);
     if (body.swingSec >= DC_CFG.flag_min_sec) issues.add('dc_swinging');
     if (body.shrugSec >= DC_CFG.flag_min_sec) issues.add('dc_shrugging');
@@ -435,7 +458,7 @@ export class DumbbellCurlRepTracker {
     const romPct = pairAvg('romPct');
     const extensionPct = pairAvg('extensionPct');
     const elbowPct = Math.min(...arms.map((a) => a.elbowScore));
-    const sym = this._symmetry(arms, L, R, both);
+    const sym = this._symmetry(arms, L, R, both, armGap);
     const swayS = 1 - ramp(body.maxSway, DC_CFG.sway_tolerance, DC_CFG.sway_zero_at);
     const leanS = 1 - ramp(body.maxLean, DC_CFG.lean_tolerance, DC_CFG.lean_zero_at);
     const shrugS = 1 - ramp(body.maxShrug, DC_CFG.shrug_tolerance, DC_CFG.shrug_zero_at);
@@ -457,7 +480,8 @@ export class DumbbellCurlRepTracker {
       && score >= DC_CFG.clean_score_min
       && !issues.has('dc_too_high')
       && !issues.has('dc_incomplete')
-      && !issues.has('dc_not_lowering');
+      && !issues.has('dc_not_lowering')
+      && !issues.has('dc_arms_uneven');
 
     if (counted) {
       this.count += 1;
@@ -498,6 +522,8 @@ export class DumbbellCurlRepTracker {
       },
       symmetryDiff: sym.heightDiff == null ? null : round2(sym.heightDiff),
       timingDiffSec: sym.timingDiff == null ? null : round2(sym.timingDiff),
+      armGap: both ? round2(armGap) : null,
+      unevenSec: both ? round2(unevenSec) : null,
       left: L,
       right: R,
       durationSec: round2(Math.max(0, endAt - startAt)),
@@ -566,6 +592,7 @@ export function summarizeDumbbellCurl(attempts, {
       tooHigh: has('dc_too_high'),
       elbowMoving: has('dc_elbow_moving'),
       notLowering: has('dc_not_lowering'),
+      armsUneven: has('dc_arms_uneven'),
       swinging: has('dc_swinging'),
       shrugging: has('dc_shrugging'),
       shouldersUneven: has('dc_shoulders_uneven'),

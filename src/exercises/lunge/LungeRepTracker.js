@@ -34,15 +34,25 @@ export const LUNGE_STATE = {
 const SIDES = ['left', 'right'];
 const other = (side) => (side === 'left' ? 'right' : 'left');
 
-/** Faults evaluated every frame while a rep is in progress (config read live). */
+/**
+ * Faults evaluated every frame while a rep is in progress (config read live).
+ * `get(m, rep, state)` returns the value compared against `on`, or null.
+ */
 function frameRules(view) {
   const C = LUNGE_CFG;
+  const abs = (v) => (v == null ? null : Math.abs(v));
   if (view === 'side') {
+    const goingDown = (state) => state === LUNGE_STATE.DESCENDING || state === LUNGE_STATE.BOTTOM;
     return [
       { key: 'lunge_torso_lean', get: (m) => m.leanDeg, on: C.torso_lean_max_deg },
+      { key: 'lunge_torso_lean_back', get: (m) => (m.leanDeg == null ? null : -m.leanDeg), on: C.torso_lean_max_deg },
+      {
+        key: 'lunge_front_shin',
+        get: (m, r, state) => (r.leg && goingDown(state) ? abs(m.shinDeg?.[r.leg]) : null),
+        on: C.shin_vertical_max_deg,
+      },
     ];
   }
-  const abs = (v) => (v == null ? null : Math.abs(v));
   return [
     { key: 'lunge_knee_collapse_left', get: (m) => m.valgusLeft, on: C.knee_valgus_max },
     { key: 'lunge_knee_collapse_right', get: (m) => m.valgusRight, on: C.knee_valgus_max },
@@ -228,7 +238,7 @@ export class LungeRepTracker {
     const C = LUNGE_CFG;
     const live = [];
     for (const rule of frameRules(this.view)) {
-      const v = rule.get(m);
+      const v = rule.get(m, r, this.state);
       if (v == null || !Number.isFinite(v)) continue;
       r.maxVal[rule.key] = Math.max(r.maxVal[rule.key] ?? -Infinity, v);
       if (!this._latch[rule.key] && v > rule.on) this._latch[rule.key] = true;
@@ -365,12 +375,20 @@ export class LungeRepTracker {
       const frontKnee = leg ? r.minKnee[leg] : null;
       const rearKnee = leg ? r.minKnee[other(leg)] : null;
       c.kneeFlex = frontKnee == null ? null : fromRamp(frontKnee, C.front_knee_good_deg, C.front_knee_zero_deg);
-      c.torso = fromRamp(maxOf('lunge_torso_lean'), C.torso_lean_max_deg, C.torso_lean_zero_deg);
+      const leanFwd = maxOf('lunge_torso_lean');
+      const leanBack = maxOf('lunge_torso_lean_back');
+      const lean = leanFwd == null && leanBack == null ? null : Math.max(leanFwd ?? 0, leanBack ?? 0);
+      const shin = maxOf('lunge_front_shin');
+      c.torso = fromRamp(lean, C.torso_lean_max_deg, C.torso_lean_zero_deg);
+      c.shin = fromRamp(shin, C.shin_vertical_max_deg, C.shin_vertical_zero_deg);
       c.balance = wobbleScore;
+      const rnd = (v) => (v == null ? null : Math.round(v));
       metrics = {
-        frontKneeDeg: frontKnee == null ? null : Math.round(frontKnee),
-        rearKneeDeg: rearKnee == null ? null : Math.round(rearKnee),
-        torsoLeanDeg: maxOf('lunge_torso_lean') == null ? null : Math.round(maxOf('lunge_torso_lean')),
+        frontKneeDeg: rnd(frontKnee),
+        rearKneeDeg: rnd(rearKnee),
+        torsoLeanDeg: rnd(leanFwd),
+        torsoLeanBackDeg: rnd(leanBack),
+        frontShinDeg: rnd(shin),
       };
     }
 

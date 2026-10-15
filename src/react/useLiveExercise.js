@@ -6,6 +6,7 @@ import { createPoseLandmarker } from '../core/poseLandmarker';
 import { drawSkeleton } from '../core/drawSkeleton';
 import { trackingSettings } from '../core/trackingSettings';
 import { resolveExerciseId, getExercise } from '../core/registry';
+import { nowSec, setEngineClockPaused } from '../core/landmarks';
 
 const CAMERA_TIMEOUT_MS = 20000;
 const PLAY_TIMEOUT_MS = 10000;
@@ -67,6 +68,8 @@ export function useLiveExercise({
   onRepCountChange,
   onStateChange,
   onRepComplete,
+  /** Called on EVERY processed frame (after the overlay is drawn) — unthrottled. */
+  onFrame,
 } = {}) {
   const videoRef = useRef(null);
   const canvasRef = useRef(null);
@@ -87,15 +90,18 @@ export function useLiveExercise({
   const onRepCountChangeRef = useRef(onRepCountChange);
   const onStateChangeRef = useRef(onStateChange);
   const onRepCompleteRef = useRef(onRepComplete);
+  const onFrameRef = useRef(onFrame);
   const mirroredRef = useRef(mirrored);
   useEffect(() => { mirroredRef.current = mirrored; }, [mirrored]);
   useEffect(() => { onRepCountChangeRef.current = onRepCountChange; }, [onRepCountChange]);
   useEffect(() => { onStateChangeRef.current = onStateChange; }, [onStateChange]);
   useEffect(() => { onRepCompleteRef.current = onRepComplete; }, [onRepComplete]);
+  useEffect(() => { onFrameRef.current = onFrame; }, [onFrame]);
 
   const stop = useCallback(() => {
     cancelAnimationFrame(rafRef.current);
     rafRef.current = 0;
+    setEngineClockPaused(false);
     if (streamRef.current) {
       streamRef.current.getTracks().forEach((t) => t.stop());
       streamRef.current = null;
@@ -240,11 +246,19 @@ export function useLiveExercise({
       const tracker = trackerRef.current;
       if (!video || !canvas || !landmarker || !tracker) return;
 
+      // Uploaded video paused: keep the last overlay, stop the engine clock.
+      if (videoSrc && video.paused) {
+        setEngineClockPaused(true);
+        rafRef.current = requestAnimationFrame(loop);
+        return;
+      }
+      setEngineClockPaused(false);
+
       if (video.readyState >= 2 && video.videoWidth > 0) {
         if (canvas.width !== video.videoWidth) canvas.width = video.videoWidth;
         if (canvas.height !== video.videoHeight) canvas.height = video.videoHeight;
 
-        let ts = performance.now();
+        let ts = nowSec() * 1000;
         if (ts <= lastTsRef.current) ts = lastTsRef.current + 1;
         lastTsRef.current = ts;
 
@@ -282,6 +296,14 @@ export function useLiveExercise({
             tracker.draw(ctx, landmarks, frame, next);
           } catch (err) {
             console.error('[useLiveExercise] tracker.draw failed:', err);
+          }
+        }
+
+        if (next) {
+          try {
+            onFrameRef.current?.(next);
+          } catch (err) {
+            console.error('[useLiveExercise] onFrame failed:', err);
           }
         }
 

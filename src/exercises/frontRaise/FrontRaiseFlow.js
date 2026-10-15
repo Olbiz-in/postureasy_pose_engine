@@ -16,7 +16,7 @@
 import { VoiceManager } from '../../core/voiceManager.js';
 import { nowSec } from '../../core/landmarks.js';
 import {
-  FR_CFG, FR_FEEDBACK, FR_VOICE_MSG, FR_STANCE_PRIORITY, FR_TRACKED_LANDMARKS,
+  FR_CFG, FR_FEEDBACK, FR_VOICE_MSG, FR_STANCE_PRIORITY, FR_ISSUE_PRIORITY, FR_TRACKED_LANDMARKS,
   FR_COLOR_GREEN, FR_COLOR_AMBER, FR_COLOR_RED, FR_COLOR_GREY,
 } from './config.js';
 import { LandmarkSmoother } from '../common/landmarkSmoother.js';
@@ -88,7 +88,7 @@ export class FrontRaiseFlow {
     this._lastTickAt = -1;
 
     this._cueOnset = new Map();
-    this._mistakeGate = new RepeatMistakeGate();
+    this._mistakeGate = new RepeatMistakeGate({ pick: (k) => firstByPriority(k, FR_ISSUE_PRIORITY) });
     this._mistake = '';
     this._mistakeUntil = -1;
     this._feedback = '';

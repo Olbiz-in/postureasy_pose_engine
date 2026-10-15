@@ -90,6 +90,12 @@ export const DC_CFG_DEFAULTS = {
   // Sway / lean / shrug are measured against the posture this long before the
   // rep started (the start of a momentum swing happens before curl_start).
   body_baseline_lookback_sec: 0.3,
+  // 'both' mode: the arms must curl together. At every moment of the rep the
+  // left and right curl progress (0 = resting, 1 = target line) must stay
+  // within `arm_sync_tolerance` of each other; uneven longer than
+  // `arm_sync_min_sec` inside a rep → dc_arms_uneven.
+  arm_sync_tolerance: 0.25,
+  arm_sync_min_sec: 0.25,
   symmetry_timing_max_sec: 0.30, // |left − right top time| with no penalty
   symmetry_timing_share: 0.3, // part of the symmetry score given to timing ('both' mode)
 
@@ -103,6 +109,7 @@ export const DC_CFG_DEFAULTS = {
   shoulder_tilt_zero_at: 0.30,
   symmetry_zero_at: 0.50, // height difference ramp starts at 0
   symmetry_timing_zero_at_sec: 1.0,
+  arm_sync_zero_at: 0.70, // progress gap between the arms (ramp from arm_sync_tolerance)
   rom_extension_share: 0.15, // part of the ROM score given to lowering fully
   clean_score_min: 75,
 
@@ -160,6 +167,7 @@ export const DC_ISSUE_PRIORITY = [
   'dc_too_high',
   'dc_not_high_enough',
   'dc_not_lowering',
+  'dc_arms_uneven',
   'dc_elbow_moving',
   'dc_swinging',
   'dc_shrugging',
@@ -169,6 +177,7 @@ export const DC_ISSUE_PRIORITY = [
 // Live (mid-rep) cue priority for the on-screen mistake box.
 export const DC_LIVE_PRIORITY = [
   'dc_too_high',
+  'dc_arms_uneven',
   'dc_elbow_moving',
   'dc_swinging',
   'dc_shrugging',
@@ -201,6 +210,7 @@ export const DC_FEEDBACK = {
   dc_too_high: 'Curling too high — keep your elbows down, stop below the shoulders',
   dc_elbow_moving: 'Elbow moving too much — keep your elbows pinned to your sides',
   dc_not_lowering: 'Not lowering fully — straighten your arms at the bottom',
+  dc_arms_uneven: 'Arms uneven — curl both dumbbells up and down together',
   dc_swinging: 'Swinging — keep your body still, don\'t lean back',
   dc_shrugging: 'Shrugging — relax your shoulders down',
   dc_shoulders_uneven: 'Shoulders uneven — keep them level',
