@@ -5,6 +5,7 @@
 //   finish()          → stop now and return the cumulative session summary
 //   continueNextSet() → skip the rest countdown and start the next set
 
+import { exerciseDef } from '../../catalog.js';
 import { formatTrackingResult } from '../../core/trackingSettings';
 import { FrontRaiseFlow, FR_PHASE, FR_ACTIVITY } from './FrontRaiseFlow';
 import { FR_FEEDBACK } from './config';
@@ -113,16 +114,6 @@ function createFrontRaiseTracker(options = {}) {
 }
 
 export default {
-  id: 'frontraise',
-  name: 'Dumbbell Front Raise',
-  family: 'frontraise',
-  facing: 'front',
-  aliases: [
-    'front raise', 'front raises',
-    'dumbbell front raise', 'dumbbell front raises',
-    'standing front raise', 'standing dumbbell front raise',
-    'front delt raise',
-    'db front raise',
-  ],
+  ...exerciseDef('frontraise'),
   create: createFrontRaiseTracker,
 };

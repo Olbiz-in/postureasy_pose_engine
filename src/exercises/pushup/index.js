@@ -1,5 +1,6 @@
 // Push-up (front view) — delegates to PushUpFlow (full fitness_posture state machine + voice).
 
+import { exerciseDef } from '../../catalog.js';
 import { LM, nowSec } from '../../core/landmarks';
 import { formatTrackingResult } from '../../core/trackingSettings';
 import { createScoreAverager } from '../../core/repScoring';
@@ -74,14 +75,6 @@ function createPushUpTracker(options = {}) {
 }
 
 export default {
-  id: 'pushup',
-  name: 'Push-up',
-  family: 'pushup',
-  facing: 'front',
-  aliases: [
-    'push up', 'push-up', 'push ups', 'push-ups', 'pushup', 'pushups',
-    'standard push-up', 'standard pushup', 'wide push-up', 'wide push-ups',
-    'knee push-up', 'knee push-ups',
-  ],
+  ...exerciseDef('pushup'),
   create: createPushUpTracker,
 };

@@ -1,5 +1,6 @@
 // Standing dumbbell shoulder press (front view) — delegates to ShoulderPressFlow.
 
+import { exerciseDef } from '../../catalog.js';
 import { formatTrackingResult } from '../../core/trackingSettings';
 import { ShoulderPressFlow, SP_PHASE } from './ShoulderPressFlow';
 import { clampPct } from '../../core/repScoring';
@@ -98,16 +99,6 @@ function createShoulderPressTracker(options = {}) {
 }
 
 export default {
-  id: 'shoulderpress',
-  name: 'Dumbbell Shoulder Press',
-  family: 'shoulderpress',
-  facing: 'front',
-  aliases: [
-    'shoulder press', 'shoulder presses',
-    'dumbbell shoulder press', 'dumbbell shoulder presses',
-    'standing dumbbell shoulder press', 'standing shoulder press',
-    'dumbbell overhead press', 'overhead press', 'overhead dumbbell press',
-    'db shoulder press', 'seated dumbbell shoulder press',
-  ],
+  ...exerciseDef('shoulderpress'),
   create: createShoulderPressTracker,
 };

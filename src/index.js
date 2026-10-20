@@ -13,6 +13,11 @@ export {
   availableViews,
   isSupported,
   isTimedExercise,
+  exerciseFamily,
+  managesOwnSets,
+  isFlowComplete,
+  isFlowRest,
+  repsOnlyVoice,
   listExercises,
 } from './core/registry';
 
@@ -20,6 +25,11 @@ export { default as LiveExercise } from './react/LiveExercise.jsx';
 export { useLiveExercise } from './react/useLiveExercise.js';
 
 export { VoiceManager, configureVoiceManager } from './core/voiceManager.js';
+export { setIntroLine, primeSetIntro, holdDurationWords,
+  setCompleteLine, holdSetCompleteLine, formAccuracyLine, nextSetHintLine,
+  setIncompleteLine, setNotCountedLine, sessionStoppedLine,
+} from './core/sessionVoice.js';
+export { summarizeReps, summarizeHolds, repSummaryConfig } from './repSummary.js';
 
 export {
   trackingSettings,

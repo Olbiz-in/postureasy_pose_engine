@@ -8,6 +8,8 @@
   "module": "src/index.js",
   "exports": {
     ".": "./src/index.js",
+    "./catalog": "./src/catalog.js",
+    "./shared": "./src/shared.js",
     "./react": "./src/react/index.js",
     "./exercises": "./src/exercises/index.js"
   },

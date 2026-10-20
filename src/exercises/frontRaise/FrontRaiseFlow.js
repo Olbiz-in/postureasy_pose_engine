@@ -14,6 +14,7 @@
 // turned away, out of frame) never counts toward active time or any metric.
 
 import { VoiceManager } from '../../core/voiceManager.js';
+import { primeSetIntro } from '../../core/sessionVoice.js';
 import { nowSec } from '../../core/landmarks.js';
 import {
   FR_CFG, FR_FEEDBACK, FR_VOICE_MSG, FR_STANCE_PRIORITY, FR_ISSUE_PRIORITY, FR_TRACKED_LANDMARKS,
@@ -48,7 +49,7 @@ const FEEDBACK_HOLD_SEC = 2.5;
 const CALIB_MAX_SAMPLES = 60;
 
 export class FrontRaiseFlow {
-  constructor({ targetReps = 10, targetSets = 3, restSeconds = null, voice = true } = {}) {
+  constructor({ targetReps = 10, targetSets = 3, restSeconds = null, voice = true, setNumber = 1, setIntro = false, targetSeconds = 0 } = {}) {
     this._voiceEnabled = voice !== false;
     this._voice = new VoiceManager();
     this._targetReps = targetReps > 0 ? targetReps : 0;
@@ -57,6 +58,10 @@ export class FrontRaiseFlow {
     this._rep = new FrontRaiseRepTracker();
     this._smoother = new LandmarkSmoother(FR_CFG, FR_TRACKED_LANDMARKS);
     this._resetState();
+    // Rep count only ("Rep N"). The set line is off unless setIntro is passed.
+    primeSetIntro(this._voice, {
+      enabled: this._voiceEnabled, setIntro, setNumber, targetReps: this._targetReps, targetSeconds,
+    });
   }
 
   _resetState() {

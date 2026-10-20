@@ -13,6 +13,7 @@ import { TorsoBendSideRepMonitor } from './torsoMonitorSide.js';
 import { getRepSpeedWarningKey, listRepPostureWarnings, speedKeyToMessage } from '../squat/warningPriority';
 import { CFG, nowSec, COLOR_GREEN, COLOR_AMBER, COLOR_RED } from '../squat/config.js';
 import { VoiceManager } from '../../core/voiceManager.js';
+import { primeSetIntro } from '../../core/sessionVoice.js';
 import { RepeatMistakeGate } from '../common/repeatMistakeGate.js';
 import { TORSO_FORWARD_BEND_MSG } from '../squat/torsoMonitor.js';
 import { lockSideTempoGateAtStance } from './draw.js';
@@ -72,7 +73,7 @@ function _baseResult(phase, overrides = {}) {
 }
 
 export class SquatSideFlow {
-  constructor({ targetReps = 0, voice = true } = {}) {
+  constructor({ targetReps = 0, voice = true, setNumber = 1, setIntro = true, targetSeconds = 0 } = {}) {
     this._voiceEnabled = voice !== false;
     this._voice = new VoiceManager();
     this._targetReps = targetReps;
@@ -93,6 +94,9 @@ export class SquatSideFlow {
     this._doneVoiceSent = false;
     this._lastSeenRep = 0;
     CFG.squat_max_reps = targetReps;
+    primeSetIntro(this._voice, {
+      enabled: this._voiceEnabled, setIntro, setNumber, targetReps: this._targetReps, targetSeconds,
+    });
   }
 
   _speak(text, opts) {

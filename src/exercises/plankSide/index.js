@@ -3,8 +3,10 @@
 // bent knees, shoulders off the support point, head out of line) are voiced
 // live, with "move your hips up / down" taking priority.
 
+import { exerciseDef } from '../../catalog.js';
 import { nowSec } from '../../core/landmarks';
 import { VoiceManager } from '../../core/voiceManager.js';
+import { primeSetIntro } from '../../core/sessionVoice.js';
 import {
   PLANK_SIDE_CFG as CFG,
   PLANK_FAULT_PRIORITY,
@@ -147,6 +149,13 @@ function createPlankSideTracker(options = {}) {
   const gates = Object.fromEntries(PLANK_FAULT_PRIORITY.map((k) => [k, new FaultGate()]));
 
   let targetSec = Number(options.targetSeconds) > 0 ? Number(options.targetSeconds) : CFG.default_target_sec;
+  primeSetIntro(voice, {
+    enabled: voiceEnabled,
+    setIntro: options.setIntro !== false,
+    setNumber: options.setNumber,
+    targetReps: 0,
+    targetSeconds: targetSec,
+  });
   let lastT = -1;
   let holding = false;
   let everHeld = false;
@@ -538,21 +547,6 @@ function createPlankSideTracker(options = {}) {
 }
 
 export default {
-  id: 'plank-side',
-  name: 'Plank (side view)',
-  family: 'plank',
-  facing: 'side',
-  timed: true,
-  aliases: [
-    'plank',
-    'planks',
-    'plank hold',
-    'forearm plank',
-    'elbow plank',
-    'front plank',
-    'high plank',
-    'straight arm plank',
-    'side view plank',
-  ],
+  ...exerciseDef('plank-side'),
   create: createPlankSideTracker,
 };

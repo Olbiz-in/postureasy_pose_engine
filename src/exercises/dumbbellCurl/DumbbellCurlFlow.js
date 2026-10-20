@@ -19,6 +19,7 @@
 // mistakes and stance corrections are on-screen text only.
 
 import { VoiceManager } from '../../core/voiceManager.js';
+import { primeSetIntro } from '../../core/sessionVoice.js';
 import { nowSec } from '../../core/landmarks.js';
 import {
   DC_CFG, DC_FEEDBACK, DC_VOICE_MSG, DC_STANCE_PRIORITY, DC_ISSUE_PRIORITY, DC_LIVE_PRIORITY, DC_TRACKED_LANDMARKS,
@@ -50,7 +51,7 @@ const FEEDBACK_HOLD_SEC = 2.5;
 const CALIB_MAX_SAMPLES = 60;
 
 export class DumbbellCurlFlow {
-  constructor({ targetReps = 10, targetSets = 3, restSeconds = null, voice = true } = {}) {
+  constructor({ targetReps = 10, targetSets = 3, restSeconds = null, voice = true, setNumber = 1, setIntro = true, targetSeconds = 0 } = {}) {
     this._voiceEnabled = voice !== false;
     this._voice = new VoiceManager();
     this._targetReps = targetReps > 0 ? targetReps : 0;
@@ -59,6 +60,9 @@ export class DumbbellCurlFlow {
     this._rep = new DumbbellCurlRepTracker();
     this._smoother = new LandmarkSmoother(DC_CFG, DC_TRACKED_LANDMARKS);
     this._resetState();
+    primeSetIntro(this._voice, {
+      enabled: this._voiceEnabled, setIntro, setNumber, targetReps: this._targetReps, targetSeconds,
+    });
   }
 
   _resetState() {

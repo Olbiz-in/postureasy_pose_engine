@@ -4,6 +4,7 @@
 // repCount, emits one `repEvent` per counted rep and an `attemptEvent` for
 // every attempt (incomplete ones are never counted).
 
+import { exerciseDef } from '../../catalog.js';
 import { formatTrackingResult } from '../../core/trackingSettings.js';
 import { LegRaiseFlow, LGR_PHASE } from './LegRaiseFlow.js';
 import { LGR_STATE } from './LegRaiseRepTracker.js';
@@ -103,16 +104,6 @@ function createLegRaiseTracker(options = {}) {
 }
 
 export default {
-  id: 'leg-raise-side',
-  name: 'Leg Raise (side view)',
-  family: 'legraise',
-  facing: 'side',
-  aliases: [
-    'leg raise', 'leg raises',
-    'lying leg raise', 'lying leg raises',
-    'lying straight leg raise', 'straight leg raise', 'straight leg raises',
-    'floor leg raise', 'flat leg raise',
-    'leg raise side', 'leg-raise-side', 'leg-raise',
-  ],
+  ...exerciseDef('leg-raise-side'),
   create: createLegRaiseTracker,
 };

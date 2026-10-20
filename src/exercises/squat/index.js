@@ -1,5 +1,6 @@
 // Squat (front view) — delegates to SquatFlow (full fitness_posture state machine + voice).
 
+import { exerciseDef } from '../../catalog.js';
 import { LM, midpoint, shoulderWidth } from '../../core/landmarks';
 import { formatTrackingResult } from '../../core/trackingSettings';
 import { createScoreAverager } from '../../core/repScoring';
@@ -109,13 +110,6 @@ function createSquatTracker(options = {}) {
 }
 
 export default {
-  id: 'squat',
-  name: 'Squat',
-  family: 'squat',
-  facing: 'front',
-  aliases: [
-    'squat', 'squats', 'bodyweight squat', 'bodyweight squats',
-    'air squat', 'air squats', 'goblet squat', 'walking lunges',
-  ],
+  ...exerciseDef('squat'),
   create: createSquatTracker,
 };

@@ -5,6 +5,7 @@
 //   finish()          → stop now and return the cumulative session summary
 //   continueNextSet() → skip the rest countdown and start the next set
 
+import { exerciseDef } from '../../catalog.js';
 import { formatTrackingResult } from '../../core/trackingSettings';
 import { LateralRaiseFlow, LR_PHASE, LR_ACTIVITY } from './LateralRaiseFlow';
 import { LR_FEEDBACK } from './config';
@@ -113,16 +114,6 @@ function createLateralRaiseTracker(options = {}) {
 }
 
 export default {
-  id: 'lateralraise',
-  name: 'Dumbbell Lateral Raise',
-  family: 'lateralraise',
-  facing: 'front',
-  aliases: [
-    'lateral raise', 'lateral raises',
-    'dumbbell lateral raise', 'dumbbell lateral raises',
-    'standing lateral raise', 'standing dumbbell lateral raise',
-    'side lateral raise', 'side raise', 'side raises',
-    'db lateral raise',
-  ],
+  ...exerciseDef('lateralraise'),
   create: createLateralRaiseTracker,
 };

@@ -32,6 +32,7 @@
 // corrections, one at a time, and always queued — never cutting off the count.
 
 import { VoiceManager } from '../../core/voiceManager.js';
+import { primeSetIntro } from '../../core/sessionVoice.js';
 import { nowSec } from '../../core/landmarks.js';
 import {
   SR_CFG, SR_FEEDBACK, SR_VOICE_MSG, SR_SETUP_PRIORITY, SR_ISSUE_PRIORITY, SR_LIVE_PRIORITY, SR_TRACKED_LANDMARKS,
@@ -76,7 +77,7 @@ const UPRIGHT_SLACK_DEG = 10; // extra torso angle allowed mid-set before "not i
 const SIDE_LABEL = { left: 'Left', right: 'Right' };
 
 export class SingleArmDumbbellRowFlow {
-  constructor({ targetReps = 10, targetSets = 3, restSeconds = null, voice = true } = {}) {
+  constructor({ targetReps = 10, targetSets = 3, restSeconds = null, voice = true, setNumber = 1, setIntro = true, targetSeconds = 0 } = {}) {
     this._voiceEnabled = voice !== false;
     this._voice = new VoiceManager();
     this._targetReps = targetReps > 0 ? targetReps : 0;
@@ -85,6 +86,9 @@ export class SingleArmDumbbellRowFlow {
     this._rep = new SingleArmDumbbellRowRepTracker();
     this._smoother = new LandmarkSmoother(SR_CFG, SR_TRACKED_LANDMARKS);
     this._resetState();
+    primeSetIntro(this._voice, {
+      enabled: this._voiceEnabled, setIntro, setNumber, targetReps: this._targetReps, targetSeconds,
+    });
   }
 
   _resetState() {

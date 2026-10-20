@@ -14,6 +14,7 @@
 // and scores them. Resetting (or a new session) clears all of it.
 
 import { VoiceManager } from '../../core/voiceManager.js';
+import { primeSetIntro } from '../../core/sessionVoice.js';
 import { nowSec } from '../../core/landmarks.js';
 import { createScoreAverager } from '../../core/repScoring.js';
 import { LandmarkSmoother } from '../common/landmarkSmoother.js';
@@ -44,7 +45,7 @@ const REP_MISTAKE_HOLD_SEC = 3.0;
 const MIN_CALIB_SAMPLES = 8;
 
 export class LungeFlow {
-  constructor({ view = 'front', targetReps = 0, voice = true } = {}) {
+  constructor({ view = 'front', targetReps = 0, voice = true, setNumber = 1, setIntro = true, targetSeconds = 0 } = {}) {
     this._view = view === 'side' ? 'side' : 'front';
     this._voiceEnabled = voice !== false;
     this._voice = new VoiceManager();
@@ -54,6 +55,9 @@ export class LungeFlow {
     this._mistakeGate = new RepeatMistakeGate({ pick: (k) => firstByPriority(k, LUNGE_ISSUE_PRIORITY) });
     this._scores = createScoreAverager();
     this._resetState();
+    primeSetIntro(this._voice, {
+      enabled: this._voiceEnabled, setIntro, setNumber, targetReps: this._targetReps, targetSeconds,
+    });
   }
 
   _resetState() {

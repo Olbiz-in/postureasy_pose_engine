@@ -1,5 +1,6 @@
 // Side-view squat — delegates to SquatSideFlow (same state machine as front view).
 
+import { exerciseDef } from '../../catalog.js';
 import { formatTrackingResult } from '../../core/trackingSettings';
 import { createScoreAverager } from '../../core/repScoring';
 import { SquatSideFlow, SIDE_PHASE } from './SquatSideFlow.js';
@@ -91,10 +92,6 @@ function createSideSquatTracker(options = {}) {
 }
 
 export default {
-  id: 'squat-side',
-  name: 'Squat (side view)',
-  family: 'squat',
-  facing: 'side',
-  aliases: ['squat side', 'side squat', 'side-squat'],
+  ...exerciseDef('squat-side'),
   create: createSideSquatTracker,
 };

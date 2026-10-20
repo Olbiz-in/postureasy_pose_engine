@@ -31,6 +31,17 @@
 // `targetSeconds` in create(), keep repCount at 0 and additionally report
 // holdSec / targetSec / holdComplete. Their tracker exposes finish() → summary.
 
+import {
+  resolveExerciseId as resolveCatalogId,
+  availableViews as catalogViews,
+  isTimedExercise as catalogTimed,
+  managesOwnSets as catalogManagesSets,
+  isFlowComplete as catalogFlowComplete,
+  isFlowRest as catalogFlowRest,
+  repsOnlyVoice as catalogRepsOnly,
+  exerciseFamily as catalogFamily,
+} from '../catalog.js';
+
 const _exercises = new Map();
 const _aliasIndex = new Map();
 
@@ -55,67 +66,17 @@ export function getExercise(id) {
 
 /**
  * Resolve any plan/display name (e.g. "Bodyweight Squat") to a registered id.
- *
- * When `view` ('front' | 'side') is supplied, the result is the registered
- * exercise in the SAME family whose `facing` matches the requested view, if one
- * exists; otherwise the base resolution is returned. This lets the app flip a
- * single front/side toggle and have the engine pick the right tracker variant.
+ * The name list and the family fallbacks live in catalog.js. This only returns
+ * an id the live engine has actually registered.
  */
 export function resolveExerciseId(nameOrId, view) {
-  const key = norm(nameOrId);
-  let baseId = _exercises.has(nameOrId) ? nameOrId : _aliasIndex.get(key) || null;
-
-  // Family fallback: any plan exercise whose name reads as a push-up or squat
-  // variant (e.g. "Decline Push-ups", "Goblet Squat") maps to that family so the
-  // matching tracker is used. Unrelated movements stay unsupported.
-  if (!baseId) {
-    if (/\bplanks?\b/.test(key)) {
-      // Static front planks only; side planks and dynamic plank variants are different movements.
-      if (!/side|jack|walk|tap|twist|rotat|reach|knee|up\b|to\b|copenhagen|reverse|saw|dip/.test(key)) {
-        baseId = _aliasIndex.get('plank') || null;
-      }
-    } else if (/(shoulder|overhead)\s*press/.test(key)) baseId = _aliasIndex.get('shoulder press') || null;
-    else if (/lateral\s*raise/.test(key)) baseId = _aliasIndex.get('lateral raise') || null;
-    else if (/front\s*raise/.test(key) && !/alternat|seated|plate|barbell|cable/.test(key)) baseId = _aliasIndex.get('front raise') || null;
-    else if (/\b(single|one|1)[\s-]*arm\b.*\brows?\b/.test(key) && !/cable|barbell|machine|landmine|band|seated|upright|t-bar|inverted/.test(key)) {
-      baseId = _aliasIndex.get('single arm dumbbell row') || null;
-    }
-    else if (/\blunges?\b/.test(key) && !/walking|jump|lateral|side|curtsy|cossack|bulgarian|overhead|barbell|smith|machine/.test(key)) {
-      // Stationary lunge variants only; walking / jumping / lateral lunges move the body through the frame.
-      baseId = _aliasIndex.get('lunge') || null;
-    }
-    else if (/\bleg\s*raises?\b/.test(key) && !/hanging|captain|standing|side|lateral|seated|donkey|single|one[\s-]*leg|incline|decline|bench|cable|machine|weighted|dumbbell|band/.test(key)) {
-      // Lying leg raise only; hanging / captain's chair / side-lying variants are different movements.
-      baseId = _aliasIndex.get('leg raise') || null;
-    }
-    else if (key.includes('squat')) baseId = _aliasIndex.get('squat') || 'squat';
-    else if (key.includes('push')) baseId = _aliasIndex.get('pushup') || 'pushup';
-    else if (/(dumbbell|bicep|biceps|hammer)\s*curl/.test(key) && !/concentration|preacher|cable|barbell|spider|incline/.test(key)) {
-      baseId = _aliasIndex.get('dumbbell curl') || null;
-    }
-  }
-
-  if (!baseId || !_exercises.has(baseId) || !view) return baseId;
-
-  const base = _exercises.get(baseId);
-  const family = base?.family || baseId;
-  for (const def of _exercises.values()) {
-    if ((def.family || def.id) === family && def.facing === view) return def.id;
-  }
-  return baseId;
+  const id = resolveCatalogId(nameOrId, view);
+  return id && _exercises.has(id) ? id : null;
 }
 
 /** All registered facings ('front'/'side'/…) available for an exercise family. */
 export function availableViews(nameOrId) {
-  const baseId = resolveExerciseId(nameOrId);
-  if (!baseId) return [];
-  const base = _exercises.get(baseId);
-  const family = base?.family || baseId;
-  const views = new Set();
-  for (const def of _exercises.values()) {
-    if ((def.family || def.id) === family && def.facing) views.add(def.facing);
-  }
-  return [...views];
+  return resolveExerciseId(nameOrId) ? catalogViews(nameOrId) : [];
 }
 
 export function isSupported(nameOrId) {
@@ -128,6 +89,27 @@ export function listExercises() {
 
 /** True when the exercise is a timed hold (seconds) rather than a rep count. */
 export function isTimedExercise(nameOrId) {
-  const id = resolveExerciseId(nameOrId);
-  return !!(id && _exercises.get(id)?.timed);
+  return resolveExerciseId(nameOrId) ? catalogTimed(nameOrId) : false;
+}
+
+export function exerciseFamily(nameOrId) {
+  return resolveExerciseId(nameOrId) ? catalogFamily(nameOrId) : null;
+}
+
+/** Tracker runs every set, including rest, inside one camera session. */
+export function managesOwnSets(nameOrId) {
+  return resolveExerciseId(nameOrId) ? catalogManagesSets(nameOrId) : false;
+}
+
+export function isFlowComplete(nameOrId, phase) {
+  return resolveExerciseId(nameOrId) ? catalogFlowComplete(nameOrId, phase) : false;
+}
+
+export function isFlowRest(nameOrId, phase) {
+  return resolveExerciseId(nameOrId) ? catalogFlowRest(nameOrId, phase) : false;
+}
+
+/** Lateral / front raise speak rep counts only. */
+export function repsOnlyVoice(nameOrId) {
+  return resolveExerciseId(nameOrId) ? catalogRepsOnly(nameOrId) : false;
 }

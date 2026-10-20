@@ -1,8 +1,10 @@
 // Side-view push-up exercise definition. Tracks back straightness, depth, full
 // extension and hand placement, counting reps from the visible-side elbow angle.
 
+import { exerciseDef } from '../../catalog.js';
 import { nowSec } from '../../core/landmarks';
 import { VoiceManager } from '../../core/voiceManager.js';
+import { primeSetIntro } from '../../core/sessionVoice.js';
 import { createScoreAverager } from '../../core/repScoring';
 import { RepeatMistakeGate } from '../common/repeatMistakeGate.js';
 import { SIDE_PUSHUP_CFG, SIDE_PUSHUP_FEEDBACK, FORM_COLORS, SIDE_PUSHUP_UP_THRESHOLD } from './config';
@@ -48,6 +50,13 @@ function selectPrimaryError(keys) {
 function createSidePushUpTracker(options = {}) {
   const voiceEnabled = options.voice !== false;
   const voice = new VoiceManager();
+  primeSetIntro(voice, {
+    enabled: voiceEnabled,
+    setIntro: options.setIntro !== false,
+    setNumber: options.setNumber,
+    targetReps: options.targetReps,
+    targetSeconds: options.targetSeconds,
+  });
   const rep = new SidePushUpRepTracker();
   let repErrorKeys = new Set();
   const mistakeGate = new RepeatMistakeGate({ pick: (k) => selectPrimaryError(k)?.key ?? null });
@@ -267,10 +276,6 @@ function createSidePushUpTracker(options = {}) {
 }
 
 export default {
-  id: 'pushup-side',
-  name: 'Push-up (side view)',
-  family: 'pushup',
-  facing: 'side',
-  aliases: ['pushup side', 'push-up side', 'side push-up', 'side pushup'],
+  ...exerciseDef('pushup-side'),
   create: createSidePushUpTracker,
 };

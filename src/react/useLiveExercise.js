@@ -63,6 +63,8 @@ export function useLiveExercise({
   restSeconds = 0,
   /** Hold target (s) for timed exercises such as plank; 0 = open-ended. */
   targetSeconds = 0,
+  /** 1-based set being started. The engine speaks "We are doing set N". */
+  setNumber = 1,
   /** When set, play this video URL instead of opening the webcam (debug / offline). */
   videoSrc = null,
   onRepCountChange,
@@ -132,6 +134,7 @@ export function useLiveExercise({
       targetSets: Number(targetSets) > 0 ? Number(targetSets) : 0,
       restSeconds: Number(restSeconds) > 0 ? Number(restSeconds) : 0,
       targetSeconds: Number(targetSeconds) > 0 ? Number(targetSeconds) : 0,
+      setNumber: Number(setNumber) > 0 ? Number(setNumber) : 1,
     });
     setState(IDLE_STATE);
     lastRepRef.current = 0;
@@ -329,7 +332,7 @@ export function useLiveExercise({
       try { trackerRef.current?.reset?.(); } catch { /* noop */ }
       stop();
     };
-  }, [active, exerciseId, voice, uiHz, videoSrc, targetReps, targetSets, restSeconds, targetSeconds, stop]);
+  }, [active, exerciseId, voice, uiHz, videoSrc, targetReps, targetSets, restSeconds, targetSeconds, setNumber, stop]);
 
   // Keep the live tracker in sync if the planned rep count changes mid-session.
   useEffect(() => {

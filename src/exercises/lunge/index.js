@@ -5,6 +5,7 @@
 // emits one `repEvent` per counted rep and an `attemptEvent` for every attempt
 // (including incomplete ones, which are never counted).
 
+import { exerciseDef } from '../../catalog.js';
 import { formatTrackingResult } from '../../core/trackingSettings.js';
 import { LungeFlow, LUNGE_PHASE } from './LungeFlow.js';
 import { LUNGE_STATE } from './LungeRepTracker.js';
@@ -110,27 +111,13 @@ function createLungeTracker(view, options = {}) {
   };
 }
 
-const ALIASES = [
-  'lunge', 'lunges', 'bodyweight lunge', 'bodyweight lunges',
-  'forward lunge', 'forward lunges', 'reverse lunge', 'reverse lunges',
-  'dumbbell lunge', 'dumbbell lunges', 'static lunge', 'static lunges',
-];
-
 export const lungeFront = {
-  id: 'lunge',
-  name: 'Lunge',
-  family: 'lunge',
-  facing: 'front',
-  aliases: ALIASES,
+  ...exerciseDef('lunge'),
   create: (options) => createLungeTracker('front', options),
 };
 
 export const lungeSide = {
-  id: 'lunge-side',
-  name: 'Lunge (side view)',
-  family: 'lunge',
-  facing: 'side',
-  aliases: ['lunge side', 'lunge-side'],
+  ...exerciseDef('lunge-side'),
   create: (options) => createLungeTracker('side', options),
 };
 

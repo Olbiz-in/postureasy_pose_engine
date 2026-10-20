@@ -6,6 +6,7 @@
 //   finish()          → stop now and return the cumulative session summary
 //   continueNextSet() → skip the rest countdown and start the next set
 
+import { exerciseDef } from '../../catalog.js';
 import { formatTrackingResult } from '../../core/trackingSettings';
 import { SingleArmDumbbellRowFlow, SR_PHASE, SR_ACTIVITY } from './SingleArmDumbbellRowFlow';
 import { SR_ARM_STATE } from './SingleArmDumbbellRowRepTracker';
@@ -120,18 +121,6 @@ function createSingleArmDumbbellRowTracker(options = {}) {
 }
 
 export default {
-  id: 'singleArmDumbbellRow',
-  name: 'Single-Arm Dumbbell Row',
-  family: 'singlearmdumbbellrow',
-  facing: 'side',
-  aliases: [
-    'single-arm dumbbell row', 'single-arm dumbbell rows',
-    'single arm dumbbell row', 'single arm dumbbell rows',
-    'one-arm dumbbell row', 'one-arm dumbbell rows',
-    'one arm dumbbell row', 'one arm dumbbell rows',
-    'dumbbell row', 'dumbbell rows',
-    'single-arm row', 'single arm row', 'one-arm row', 'one arm row',
-    'single-arm db row', 'one-arm db row', 'db row',
-  ],
+  ...exerciseDef('singleArmDumbbellRow'),
   create: createSingleArmDumbbellRowTracker,
 };

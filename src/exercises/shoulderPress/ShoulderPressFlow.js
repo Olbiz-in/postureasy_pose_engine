@@ -13,6 +13,7 @@
 // they cannot cancel a queued "Do rep N". "Too deep" only after arms reached top.
 
 import { VoiceManager } from '../../core/voiceManager.js';
+import { primeSetIntro } from '../../core/sessionVoice.js';
 import { nowSec } from '../../core/landmarks.js';
 import {
   SP_CFG, SP_VOICE_MSG, SP_FEEDBACK, SP_LIVE_PRIORITY,
@@ -84,12 +85,15 @@ function _baseResult(phase, overrides = {}) {
 }
 
 export class ShoulderPressFlow {
-  constructor({ targetReps = 0, voice = true } = {}) {
+  constructor({ targetReps = 0, voice = true, setNumber = 1, setIntro = true, targetSeconds = 0 } = {}) {
     this._voiceEnabled = voice !== false;
     this._voice = new VoiceManager();
     this._targetReps = targetReps > 0 ? targetReps : 0;
     this._rep = new ShoulderPressRepTracker();
     this._resetState();
+    primeSetIntro(this._voice, {
+      enabled: this._voiceEnabled, setIntro, setNumber, targetReps: this._targetReps, targetSeconds,
+    });
   }
 
   _resetState() {

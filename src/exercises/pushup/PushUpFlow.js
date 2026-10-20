@@ -12,6 +12,7 @@
 // Zero imports from any squat file.
 
 import { VoiceManager } from '../../core/voiceManager.js';
+import { primeSetIntro } from '../../core/sessionVoice.js';
 import { nowSec }          from '../../core/landmarks.js';
 import {
   PUSHUP_CFG, PUSHUP_VOICE_MSG,
@@ -73,7 +74,7 @@ function _baseResult(phase, overrides = {}) {
 // ── Main hook ─────────────────────────────────────────────────────────────────
 
 export class PushUpFlow {
-  constructor({ targetReps = 0, voice = true } = {}) {
+  constructor({ targetReps = 0, voice = true, setNumber = 1, setIntro = true, targetSeconds = 0 } = {}) {
     this._voiceEnabled = voice !== false;
     this._voice = new VoiceManager();
     this._targetReps = targetReps;
@@ -88,6 +89,9 @@ export class PushUpFlow {
     this._doneVoiceSent = false;
     this._lastLiveCueKey = '';
     PUSHUP_CFG.pushup_max_reps = targetReps;
+    primeSetIntro(this._voice, {
+      enabled: this._voiceEnabled, setIntro, setNumber, targetReps: this._targetReps, targetSeconds,
+    });
   }
 
   _speak(text, opts) {

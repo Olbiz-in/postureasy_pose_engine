@@ -5,6 +5,7 @@
 //   finish()          → stop now and return the cumulative session summary
 //   continueNextSet() → skip the rest countdown and start the next set
 
+import { exerciseDef } from '../../catalog.js';
 import { formatTrackingResult } from '../../core/trackingSettings';
 import { DumbbellCurlFlow, DC_PHASE, DC_ACTIVITY } from './DumbbellCurlFlow';
 import { DC_FEEDBACK } from './config';
@@ -129,19 +130,6 @@ function createDumbbellCurlTracker(options = {}) {
 }
 
 export default {
-  id: 'dumbbellcurl',
-  name: 'Dumbbell Curl',
-  family: 'dumbbellcurl',
-  facing: 'front',
-  aliases: [
-    'dumbbell curl', 'dumbbell curls',
-    'dumbbell bicep curl', 'dumbbell bicep curls',
-    'dumbbell biceps curl', 'dumbbell biceps curls',
-    'bicep curl', 'bicep curls', 'biceps curl', 'biceps curls',
-    'standing dumbbell curl', 'standing dumbbell curls',
-    'db curl', 'db curls',
-    'hammer curl', 'hammer curls',
-    'dumbbell hammer curl', 'dumbbell hammer curls',
-  ],
+  ...exerciseDef('dumbbellcurl'),
   create: createDumbbellCurlTracker,
 };

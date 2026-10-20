@@ -30,6 +30,7 @@ import { ShoulderLevelRepMonitor } from './shoulderMonitor.js';
 import { getRepSpeedWarningKey, listRepPostureWarnings } from './warningPriority';
 import { LM, CFG, nowSec, COLOR_GREEN, COLOR_AMBER, COLOR_RED } from './config.js';
 import { VoiceManager } from '../../core/voiceManager.js';
+import { primeSetIntro } from '../../core/sessionVoice.js';
 import { RepeatMistakeGate } from '../common/repeatMistakeGate.js';
 import { lockTempoGateAtStance } from './draw.js';
 
@@ -119,7 +120,7 @@ function _baseResult(phase, overrides = {}) {
 // ── Main hook ─────────────────────────────────────────────────────────────────
 
 export class SquatFlow {
-  constructor({ targetReps = 0, voice = true } = {}) {
+  constructor({ targetReps = 0, voice = true, setNumber = 1, setIntro = true, targetSeconds = 0 } = {}) {
     this._voiceEnabled = voice !== false;
     this._voice = new VoiceManager();
     this._targetReps = targetReps;
@@ -153,6 +154,9 @@ export class SquatFlow {
     this._lastSeenRep = 0;
     this._bodyNotVisibleSince = -1;
     CFG.squat_max_reps = targetReps;
+    primeSetIntro(this._voice, {
+      enabled: this._voiceEnabled, setIntro, setNumber, targetReps: this._targetReps, targetSeconds,
+    });
   }
 
   _speak(text, opts) {

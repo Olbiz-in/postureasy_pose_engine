@@ -16,6 +16,7 @@
 // reps and scores them.
 
 import { VoiceManager } from '../../core/voiceManager.js';
+import { primeSetIntro } from '../../core/sessionVoice.js';
 import { nowSec } from '../../core/landmarks.js';
 import { createScoreAverager } from '../../core/repScoring.js';
 import { LandmarkSmoother } from '../common/landmarkSmoother.js';
@@ -54,7 +55,7 @@ export const LGR_ISSUE_JOINTS = {
 };
 
 export class LegRaiseFlow {
-  constructor({ targetReps = 0, voice = true } = {}) {
+  constructor({ targetReps = 0, voice = true, setNumber = 1, setIntro = true, targetSeconds = 0 } = {}) {
     this._voiceEnabled = voice !== false;
     this._voice = new VoiceManager();
     this._targetReps = targetReps > 0 ? targetReps : 0;
@@ -63,6 +64,9 @@ export class LegRaiseFlow {
     this._mistakeGate = new RepeatMistakeGate({ pick: (k) => firstByPriority(k, LGR_ISSUE_PRIORITY) });
     this._scores = createScoreAverager();
     this._resetState();
+    primeSetIntro(this._voice, {
+      enabled: this._voiceEnabled, setIntro, setNumber, targetReps: this._targetReps, targetSeconds,
+    });
   }
 
   _resetState() {
