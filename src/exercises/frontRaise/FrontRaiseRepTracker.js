@@ -12,7 +12,7 @@
 // the top within `pair_window_sec`) only affects the issues list, the score
 // and whether the rep is "clean". Every attempt gets a weighted 0–100 score.
 
-import { FR_CFG, FR_SCORE_WEIGHTS, FR_ISSUE_PRIORITY } from './config';
+import { FR_CFG, FR_SCORE_WEIGHTS, FR_ISSUE_PRIORITY, frontRaiseAboveLimit, frontRaiseBelowLimit } from './config';
 import { armLift } from './poseChecks';
 import { clamp01, ramp, round2, avg, firstByPriority } from '../common/math';
 
@@ -149,12 +149,12 @@ export class FrontRaiseRepTracker {
     }
     c.peakLift = Math.max(c.peakLift, lift.wrist);
     c.minWristDy = Math.min(c.minWristDy, a.wristDy);
-    if (!c.reachedTop && a.wristDy <= FR_CFG.top_tolerance) {
+    if (!c.reachedTop && a.wristDy <= frontRaiseBelowLimit()) {
       c.reachedTop = true;
       c.topAt = now;
       res.top = true;
     }
-    if (-a.wristDy > FR_CFG.too_high_tolerance) {
+    if (-a.wristDy > frontRaiseAboveLimit()) {
       c.tooHighSec += dt;
       res.liveKeys.push('fr_too_high');
     }
@@ -225,10 +225,11 @@ export class FrontRaiseRepTracker {
   _armResult(c, calib) {
     if (!c) return null;
     const restW = calib?.restWrist?.[c.side] ?? FR_CFG.rest_wrist_default;
-    const tol = FR_CFG.top_tolerance;
+    const tol = frontRaiseBelowLimit();
     const reach = c.minWristDy <= tol ? 1 : clamp01((restW - c.minWristDy) / Math.max(restW - tol, 0.1));
     const maxWristAbove = Math.max(0, -c.minWristDy);
-    const overshoot = ramp(maxWristAbove, FR_CFG.too_high_tolerance, FR_CFG.too_high_zero_at);
+    const aboveLimit = frontRaiseAboveLimit();
+    const overshoot = ramp(-c.minWristDy, aboveLimit, Math.max(FR_CFG.too_high_zero_at, aboveLimit + 0.3));
     return {
       side: c.side,
       reachedTop: c.reachedTop && !c.lost,

@@ -38,10 +38,10 @@ export const RIGHT_SIDE = new Set([
 ]);
 
 export const MSG_NO_PERSON = 'No person detected';
-export const MSG_HEAD = 'Your head is not visible. Please step back.';
-export const MSG_LEGS = 'Please step back until your full body is visible.';
-export const MSG_FEET = 'Please step back until your full body is visible.';
-export const MSG_TOO_CLOSE = 'You are too close. Step back until your full body fits the box.';
+export const MSG_HEAD = 'Step back so your shoulders are visible.';
+export const MSG_LEGS = 'Step back so your body is visible.';
+export const MSG_FEET = 'Step back so both ankles are visible.';
+export const MSG_TOO_CLOSE = 'You are too close. Step back so your shoulders and ankles are visible.';
 export const MSG_TOO_FAR = 'You are too far. Please step forward a little.';
 export const MSG_SIDE_VIEW = 'Please face the camera directly so both sides of your body are visible.';
 export const MSG_STANCE_OK = 'Your stance is perfect. Please do not move.';

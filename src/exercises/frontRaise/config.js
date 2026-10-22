@@ -52,7 +52,10 @@ export const FR_CFG_DEFAULTS = {
   // ── Shoulder line / rep detection ────────────────────────────────────────
   line_mode: 'average', // 'average' (one line, both shoulders) | 'per_side'
   // TOP ("hands at shoulder height"): wrist at most this far BELOW the line.
-  top_tolerance: 0.12,
+  // 0 = the wrist must reach the shoulder line. The ± calibration tolerance
+  // shifts this both ways (negative = must go above the line).
+  top_tolerance: -0.2,
+  top_calibration_tolerance: 0,
   // Lift fraction: 0 = calibrated resting wrist height, 1 = wrist on the line.
   // Wrist height follows 1 − cos(arm raise), so 0.25 ≈ 40°, 0.35 ≈ 50°.
   lift_start: 0.25, // arm has left the start zone (rep begins) — every cycle past this counts as a rep
@@ -64,7 +67,10 @@ export const FR_CFG_DEFAULTS = {
   rest_wrist_default: 1.7,
 
   // ── Form rules ───────────────────────────────────────────────────────────
-  too_high_tolerance: 0.15, // wrist above the line by more than this → flag
+  // Wrist may rise this far ABOVE the shoulder line before "too high".
+  // The ± calibration tolerance shifts this both ways.
+  too_high_tolerance: 0.5,
+  too_high_calibration_tolerance: 0,
   // Arms drifting out to the sides: wrist x outward of the shoulder x (/ sw),
   // only checked once the wrist lift passes `flare_check_lift`.
   flare_tolerance: 0.35,
@@ -105,6 +111,16 @@ export const FR_CFG = { ...FR_CFG_DEFAULTS };
 
 export function resetFrontRaiseCfg() {
   Object.assign(FR_CFG, FR_CFG_DEFAULTS);
+}
+
+/** Upper limit: "wrist above line" plus its ± calibration tolerance. */
+export function frontRaiseAboveLimit() {
+  return FR_CFG.too_high_tolerance + FR_CFG.too_high_calibration_tolerance;
+}
+
+/** Top line: "wrist below line" plus its ± calibration tolerance. */
+export function frontRaiseBelowLimit() {
+  return FR_CFG.top_tolerance + FR_CFG.top_calibration_tolerance;
 }
 
 /** Toggle the per-frame debug log + on-canvas readout. */

@@ -46,7 +46,7 @@ export const SP_CFG_DEFAULTS = {
   // (outward / sw). Smaller → elbows tucked in front of the chest.
   elbow_tuck_min_ratio: 0.25,
   // Top position: wrist may not be further outside the shoulder than this.
-  top_wide_ratio_max: 0.55,
+  top_wide_ratio_max: 0.9,
   // |left wrist y - right wrist y| / sw while moving → one arm lagging.
   symmetry_ratio_max: 0.25,
 

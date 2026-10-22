@@ -2,7 +2,8 @@
 // pose checks. Same voice timing, rep counting (SquatRepTracker), and feedback.
 
 import {
-  validateSideStage2Framing,
+  validateSideBody,
+  checkSideLegStraight,
   runSideStandingCheck,
   runSideFormChecks,
   getSideSquatCoords,
@@ -20,7 +21,7 @@ import { lockSideTempoGateAtStance } from './draw.js';
 
 export const SIDE_PHASE = {
   WAITING_FOR_PERSON:      'waiting_for_person',
-  CHECKING_BOUNDARY:       'checking_boundary',
+  LEGS_CHECK:              'legs_check',
   STANCE_STANDING_STRAIGHT:'stance_standing_straight',
   READY_TO_START:          'ready_to_start',
   EXERCISE_ACTIVE:         'exercise_active',
@@ -29,18 +30,18 @@ export const SIDE_PHASE = {
 
 const STANDING_GENERIC_VOICE = 'Straighten your back. Stand upright.';
 
-const BOUNDARY_STABLE_SEC      = 1.0;
-const STANCE_PASS_HOLD_SEC     = 0.8;
-const READY_TO_START_DELAY_SEC = 4.5;
+const STANCE_PASS_HOLD_SEC     = 1.2;
+const STANCE_ANNOUNCE_SEC      = 2.5;
 const VOICE_CD_MS = 10000;
 
 const VOICE_MSG = {
-  no_person:        'No person detected.',
-  inside_box:       'Please come inside the box.',
-  head_not_visible: 'Head is not visible.',
-  feet_not_visible: 'Feet are not visible.',
-  full_body_ok:     'Full body detected. Please do not move. I am going to check your stance.',
-  stance_ok:        'Don\'t move. Your stance is correct. We are going to start the exercise.',
+  no_person:        'Please stand in front of the camera.',
+  body_not_visible: 'Please stand in front of the camera.',
+  legs_begin:       'Straighten your leg and stand in profile.',
+  legs_bent:        'Straighten your leg.',
+  legs_ok:          'Your leg looks straight.',
+  upright_begin:    'Now stand tall and straight.',
+  stance_ok:        'You are standing straight. Let\'s begin the exercise.',
   do_rep_one:       'Do rep one.',
   calibrate:        'Stand tall and straight so I can calibrate your squat depth.',
   too_fast:         'Too fast.',
@@ -85,10 +86,9 @@ export class SquatSideFlow {
     this._phase = SIDE_PHASE.WAITING_FOR_PERSON;
     this._repCount = 0;
     this._activeFeedback = '';
-    this._boundaryStableStart = -1;
     this._stancePassHoldStart = -1;
+    this._legsEnteredAt = -1;
     this._readyStart = -1;
-    this._fullBodyVoiceSent = false;
     this._stanceOkVoiceSent = false;
     this._doRepOneVoiceSent = false;
     this._doneVoiceSent = false;
@@ -158,91 +158,96 @@ export class SquatSideFlow {
         return _baseResult(cur, {
           poseDetected: false, landmarks: null,
           status: 'No person detected', statusKind: 'fail',
-          drawGuideBox: true,
+          drawGuideBox: false,
         });
       }
-      this._advancePhase(SIDE_PHASE.CHECKING_BOUNDARY);
-      return _baseResult(SIDE_PHASE.CHECKING_BOUNDARY, {
+      const body = validateSideBody(landmarks);
+      if (!body.ready) {
+        this._speak(body.message || VOICE_MSG.body_not_visible, {
+          key: 'side_body_' + (body.kind || 'missing'), cooldownMs: VOICE_CD_MS,
+        });
+        return _baseResult(cur, {
+          poseDetected: true, landmarks,
+          status: body.message || VOICE_MSG.body_not_visible, statusKind: 'fail',
+          drawGuideBox: false, boneColor: COLOR_AMBER,
+          sideVis: body.vis,
+        });
+      }
+      this._legsEnteredAt = now;
+      this._stancePassHoldStart = -1;
+      this._speak(VOICE_MSG.legs_begin, { key: 'side_legs_begin', cooldownMs: 0, immediate: true });
+      this._advancePhase(SIDE_PHASE.LEGS_CHECK);
+      return _baseResult(SIDE_PHASE.LEGS_CHECK, {
         poseDetected: true, landmarks,
-        status: 'Person detected', statusKind: 'info',
-        drawGuideBox: true, boneColor: COLOR_GREEN,
+        status: 'Checking your leg…', statusKind: 'info',
+        drawGuideBox: false, boneColor: COLOR_GREEN,
+        sideVis: body.vis,
+        currentStanceCheck: 'legs',
       });
     }
 
-    if (cur === SIDE_PHASE.CHECKING_BOUNDARY) {
+    if (cur === SIDE_PHASE.LEGS_CHECK) {
       if (!landmarks) {
-        this._boundaryStableStart = -1;
+        this._stancePassHoldStart = -1;
         this._advancePhase(SIDE_PHASE.WAITING_FOR_PERSON);
         return _baseResult(SIDE_PHASE.WAITING_FOR_PERSON, {
           poseDetected: false, landmarks: null,
           status: 'No person detected', statusKind: 'fail',
-          drawGuideBox: true,
+          drawGuideBox: false,
+        });
+      }
+      const body = validateSideBody(landmarks);
+      if (!body.ready) {
+        this._stancePassHoldStart = -1;
+        this._advancePhase(SIDE_PHASE.WAITING_FOR_PERSON);
+        return _baseResult(SIDE_PHASE.WAITING_FOR_PERSON, {
+          poseDetected: true, landmarks,
+          status: body.message || VOICE_MSG.body_not_visible, statusKind: 'fail',
+          drawGuideBox: false, boneColor: COLOR_AMBER,
+          sideVis: body.vis,
         });
       }
 
-      const v = validateSideStage2Framing(landmarks, w, h);
-
-      if (v.ready) {
-        if (this._boundaryStableStart < 0) this._boundaryStableStart = now;
-        const stable = now - this._boundaryStableStart;
-
-        if (stable >= BOUNDARY_STABLE_SEC) {
-          if (!this._fullBodyVoiceSent) {
-            this._fullBodyVoiceSent = true;
-            this._speak(VOICE_MSG.full_body_ok, {
-              key: 'side_full_body_ok', cooldownMs: 0, immediate: true,
-            });
-            return _baseResult(cur, {
-              poseDetected: true, landmarks,
-              status: 'Full body detected', statusKind: 'ok',
-              drawGuideBox: true, boneColor: COLOR_GREEN,
-              stanceData: runSideStandingCheck(landmarks),
-              sideVis: v.vis,
-            });
-          }
-
-          if (stable >= BOUNDARY_STABLE_SEC + READY_TO_START_DELAY_SEC) {
-            this._boundaryStableStart = -1;
-            this._stancePassHoldStart = -1;
-            this._advancePhase(SIDE_PHASE.STANCE_STANDING_STRAIGHT);
-          }
-
-          return _baseResult(cur, {
-            poseDetected: true, landmarks,
-            status: 'Hold still…', statusKind: 'ok',
-            drawGuideBox: true, boneColor: COLOR_GREEN,
-            stanceData: runSideStandingCheck(landmarks),
-            sideVis: v.vis,
-          });
-        }
-
+      const leg = checkSideLegStraight(landmarks);
+      const announced = this._legsEnteredAt >= 0 && now - this._legsEnteredAt >= STANCE_ANNOUNCE_SEC;
+      if (!leg.ok) {
+        this._stancePassHoldStart = -1;
+        this._speak(leg.feedback, { key: 'side_' + (leg.key || 'legs'), cooldownMs: VOICE_CD_MS });
         return _baseResult(cur, {
           poseDetected: true, landmarks,
-          status: 'Full body detected. Hold still…', statusKind: 'ok',
-          drawGuideBox: true, boneColor: COLOR_GREEN,
-          stanceData: runSideStandingCheck(landmarks),
-          sideVis: v.vis,
+          status: leg.feedback, statusKind: 'warn',
+          drawGuideBox: false, boneColor: COLOR_AMBER,
+          sideVis: leg.vis,
+          currentStanceCheck: 'legs',
+          activeFeedback: leg.feedback,
         });
       }
-
-      this._boundaryStableStart = -1;
-      const kind = v.kind || 'poor_detection';
-      let line2 = null;
-      if (kind === 'head') line2 = VOICE_MSG.head_not_visible;
-      else if (kind === 'feet' || kind === 'legs') line2 = VOICE_MSG.feet_not_visible;
-
-      this._speak(VOICE_MSG.inside_box, { key: 'side_inside_box', cooldownMs: VOICE_CD_MS });
-      if (line2) {
-        this._speak(line2, { key: 'side_kind_' + kind, cooldownMs: VOICE_CD_MS });
+      if (announced) {
+        if (this._stancePassHoldStart < 0) this._stancePassHoldStart = now;
+        if (now - this._stancePassHoldStart >= STANCE_PASS_HOLD_SEC) {
+          this._stancePassHoldStart = -1;
+          this._speakQueued(VOICE_MSG.legs_ok, { key: 'side_legs_ok' });
+          this._speakQueued(VOICE_MSG.upright_begin, { key: 'side_upright_begin' });
+          this._advancePhase(SIDE_PHASE.STANCE_STANDING_STRAIGHT);
+          return _baseResult(SIDE_PHASE.STANCE_STANDING_STRAIGHT, {
+            poseDetected: true, landmarks,
+            status: 'Leg locked. Stand straight…', statusKind: 'ok',
+            drawGuideBox: false, boneColor: COLOR_GREEN,
+            stanceData: runSideStandingCheck(landmarks),
+            sideVis: leg.vis,
+            currentStanceCheck: 'standing_straight',
+          });
+        }
+      } else {
+        this._stancePassHoldStart = -1;
       }
-
       return _baseResult(cur, {
         poseDetected: true, landmarks,
-        status: v.message || 'Stand inside the yellow box.',
-        statusKind: 'fail',
-        drawGuideBox: true, boneColor: COLOR_AMBER,
-        stanceData: runSideStandingCheck(landmarks),
-        sideVis: v.vis,
+        status: announced ? 'Leg looks straight — hold…' : 'Checking your leg…',
+        statusKind: 'ok',
+        drawGuideBox: false, boneColor: COLOR_GREEN,
+        sideVis: leg.vis,
+        currentStanceCheck: 'legs',
       });
     }
 
@@ -290,28 +295,15 @@ export class SquatSideFlow {
     }
 
     if (cur === SIDE_PHASE.READY_TO_START) {
-      const elapsed = now - this._readyStart;
-
+      // Stance is already locked. Start the exercise on this frame.
       if (!this._stanceOkVoiceSent) {
         this._stanceOkVoiceSent = true;
         this._speak(VOICE_MSG.stance_ok, { key: 'side_stance_ok', cooldownMs: 0, immediate: true });
       }
 
-      if (!this._doRepOneVoiceSent && elapsed >= 3.5) {
+      if (!this._doRepOneVoiceSent) {
         this._doRepOneVoiceSent = true;
         this._speakQueued(VOICE_MSG.do_rep_one, { key: 'side_do_rep_one' });
-      }
-
-      if (elapsed < READY_TO_START_DELAY_SEC) {
-        return _baseResult(SIDE_PHASE.READY_TO_START, {
-          poseDetected: true, landmarks,
-          status: 'Starting exercise…', statusKind: 'ok',
-          drawGuideBox: false, boneColor: COLOR_GREEN,
-          stanceData: checks,
-          sideVis: checks.vis,
-          stancePassedChecks: { standing_straight: true },
-          activeFeedback: 'Get ready…',
-        });
       }
 
       if (coords) {
@@ -450,8 +442,9 @@ export class SquatSideFlow {
 
       return _baseResult(SIDE_PHASE.EXERCISE_ACTIVE, {
         poseDetected: true, landmarks,
-        status: feedbackText || (sq._inSquat ? 'Squatting…' : (sq.isCalibrated ? 'Standing' : `Calibrating (${sq.calibrationPct}%)`)),
+        status: feedbackText || (sq._inSquat ? 'Exercising' : (sq.isCalibrated ? 'Not exercising' : `Stand tall to calibrate (${sq.calibrationPct}%)`)),
         statusKind: feedbackText ? 'warn' : 'ok',
+        activity: sq._inSquat ? 'exercising' : 'not_exercising',
         drawGuideBox: false, boneColor,
         stanceData: checks,
         sideVis: coords.vis,
@@ -488,10 +481,9 @@ export class SquatSideFlow {
     this._mistakeGate.reset();
     this._wasInSquat = false;
     this._phase = SIDE_PHASE.WAITING_FOR_PERSON;
-    this._boundaryStableStart = -1;
     this._stancePassHoldStart = -1;
+    this._legsEnteredAt = -1;
     this._readyStart = -1;
-    this._fullBodyVoiceSent = false;
     this._stanceOkVoiceSent = false;
     this._doRepOneVoiceSent = false;
     this._doneVoiceSent = false;

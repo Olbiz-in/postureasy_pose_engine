@@ -7,7 +7,6 @@ import { SquatSideFlow, SIDE_PHASE } from './SquatSideFlow.js';
 import { scoreSquatRep } from '../squat/repScore';
 import { drawSideSquatTorsoTolerance } from './draw.js';
 import {
-  drawStandingGuideBox,
   drawSquatRepOverlay,
   drawTempoGateOverlay,
 } from '../squat/draw';
@@ -61,10 +60,6 @@ function createSideSquatTracker(options = {}) {
 
     draw(ctx, landmarks, frame) {
       if (!landmarks || !lastFr) return;
-
-      if (lastFr.drawGuideBox) {
-        drawStandingGuideBox(ctx, frame.width, frame.height);
-      }
 
       const vis = lastFr.sideVis || lastFr.stanceData?.vis;
       if (vis && lastFr.stanceData) {

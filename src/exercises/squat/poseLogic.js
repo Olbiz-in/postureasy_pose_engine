@@ -131,53 +131,63 @@ export function validatePoseForAnalysis(landmarks, skipSideView = false) {
 }
 
 // ---------------------------------------------------------------------------
-// Global full-body visibility gate for the entire squat pipeline
+// Camera-notice gate for squat setup.
+// The person does not have to stand inside a guide box, and the head / toes
+// do not have to be in frame. If the camera notices both shoulders and both
+// ankles (plus the hips and knees between them), setup can continue.
 // ---------------------------------------------------------------------------
-const REQUIRED_FULL_BODY_IDS = [
-  LM.NOSE,
+const CAMERA_NOTICE_IDS = [
+  LM.LEFT_SHOULDER, LM.RIGHT_SHOULDER,
   LM.LEFT_HIP, LM.RIGHT_HIP,
   LM.LEFT_KNEE, LM.RIGHT_KNEE,
   LM.LEFT_ANKLE, LM.RIGHT_ANKLE,
-  LM.LEFT_FOOT_INDEX, LM.RIGHT_FOOT_INDEX,
 ];
+
+/** True when MediaPipe noticed the landmark. Position inside a box is not required. */
+export function landmarkNoticed(lm, visMin) {
+  if (!lm) return false;
+  const v = lm.visibility == null ? 1 : lm.visibility;
+  return v >= visMin && Number.isFinite(lm.x) && Number.isFinite(lm.y);
+}
 
 export function validateFullBodyVisibility(landmarks) {
   if (!landmarks) {
     return {
       ready: false,
       kind: 'body_not_visible',
-      message: 'Please ensure your full body is visible.',
-      missingIds: new Set(REQUIRED_FULL_BODY_IDS),
+      voiceKey: 'body_not_visible',
+      message: 'Please stand in front of the camera.',
+      missingIds: new Set(CAMERA_NOTICE_IDS),
     };
   }
 
   const visMin = CFG.keypoint_vis_min;
-  const margin = CFG.keypoint_frame_margin;
   const missingIds = new Set();
-
-  for (const id of REQUIRED_FULL_BODY_IDS) {
-    const strictBottom = id === LM.LEFT_FOOT_INDEX || id === LM.RIGHT_FOOT_INDEX;
-    const bottom = strictBottom ? CFG.keypoint_bottom_margin : null;
-    if (!landmarkConfident(landmarks[id], visMin, margin, bottom)) {
-      missingIds.add(id);
-    }
+  for (const id of CAMERA_NOTICE_IDS) {
+    if (!landmarkNoticed(landmarks[id], visMin)) missingIds.add(id);
   }
 
   if (missingIds.size === 0) {
-    return { ready: true, kind: 'ok', message: '', missingIds };
+    return { ready: true, kind: 'ok', voiceKey: '', message: '', missingIds };
   }
 
-  const missingHead = missingIds.has(LM.NOSE);
-  const missingLeg =
-    missingIds.has(LM.LEFT_KNEE) || missingIds.has(LM.RIGHT_KNEE) ||
-    missingIds.has(LM.LEFT_ANKLE) || missingIds.has(LM.RIGHT_ANKLE) ||
-    missingIds.has(LM.LEFT_FOOT_INDEX) || missingIds.has(LM.RIGHT_FOOT_INDEX);
+  const missingAnkle = missingIds.has(LM.LEFT_ANKLE) || missingIds.has(LM.RIGHT_ANKLE);
+  const missingShoulder = missingIds.has(LM.LEFT_SHOULDER) || missingIds.has(LM.RIGHT_SHOULDER);
 
-  let message = 'Please ensure your full body is visible.';
-  if (missingHead && missingLeg) message = 'Your head and both legs must be visible.';
-  else if (missingHead || missingLeg) message = 'Move back so your entire body is in the frame.';
+  let voiceKey = 'body_not_visible';
+  let message = 'Please stand in front of the camera.';
+  if (missingAnkle) {
+    voiceKey = 'ankles_not_visible';
+    message = 'Step back so both ankles are visible.';
+  } else if (missingShoulder) {
+    voiceKey = 'shoulders_not_visible';
+    message = 'Step back so your shoulders are visible.';
+  } else if (missingIds.size > 0) {
+    voiceKey = 'body_partial';
+    message = 'Step back so your body is visible.';
+  }
 
-  return { ready: false, kind: 'body_not_visible', message, missingIds };
+  return { ready: false, kind: 'body_not_visible', voiceKey, message, missingIds };
 }
 
 // ---------------------------------------------------------------------------
@@ -247,13 +257,9 @@ export function bodyFitsGuideBox(landmarks, w, h) {
 // ---------------------------------------------------------------------------
 // Stage 2 and 3 validation
 // ---------------------------------------------------------------------------
-export function validateStage2Framing(landmarks, w, h) {
-  const v = validatePoseForAnalysis(landmarks, true);
-  if (!v.ready) return v;
-  const [boxOk, boxMsg, boxKind] = bodyFitsGuideBox(landmarks, w, h);
-  if (boxOk) return v;
-  return { ready: false, message: boxMsg, kind: boxKind,
-           gateHead: v.gateHead, gateUpper: v.gateUpper, gateLower: v.gateLower };
+export function validateStage2Framing(landmarks, _w, _h) {
+  // Framing is camera notice only. A guide box is not part of squat setup.
+  return validatePoseForAnalysis(landmarks, true);
 }
 
 export function checkFrontFacing(landmarks) {
@@ -391,6 +397,57 @@ export function checkShoulderAnkleWidth(landmarks) {
     checkOk: { shoulder_ankle_width: ok },
     skelOk: ok,
     stanceMode: 'width',
+  };
+}
+
+/**
+ * Standing-straight gate. Same ratios the standing dumbbell exercises use:
+ * shoulder-press side lean / level shoulders, and the raise torso-height
+ * and hip-above-ankle floors (a crouch fails before the set starts).
+ */
+export const SQUAT_UPRIGHT = {
+  lean_max: 0.18,
+  torso_height_min: 0.9,
+  hip_above_ankle_min: 1.5,
+  shoulder_level_max: 0.12,
+};
+
+export function evaluateSquatUpright(landmarks) {
+  const ls = landmarks[LM.LEFT_SHOULDER];
+  const rs = landmarks[LM.RIGHT_SHOULDER];
+  const lh = landmarks[LM.LEFT_HIP];
+  const rh = landmarks[LM.RIGHT_HIP];
+  const la = landmarks[LM.LEFT_ANKLE];
+  const ra = landmarks[LM.RIGHT_ANKLE];
+  const sw = Math.max(Math.abs(ls.x - rs.x), 1e-6);
+  const shY = (ls.y + rs.y) * 0.5;
+  const hipY = (lh.y + rh.y) * 0.5;
+  const ankleY = (la.y + ra.y) * 0.5;
+  const lean = Math.abs((ls.x + rs.x) * 0.5 - (lh.x + rh.x) * 0.5) / sw;
+  const torsoH = (hipY - shY) / sw;
+  const hipAboveAnkle = (ankleY - hipY) / sw;
+  const shoulderDrop = Math.abs(ls.y - rs.y) / sw;
+
+  let key = null;
+  let feedback = 'You are standing straight.';
+  if (hipAboveAnkle < SQUAT_UPRIGHT.hip_above_ankle_min || torsoH < SQUAT_UPRIGHT.torso_height_min) {
+    key = 'not_upright';
+    feedback = 'Stand up tall and straight.';
+  } else if (lean > SQUAT_UPRIGHT.lean_max) {
+    key = 'not_upright';
+    feedback = 'Stand up straight. Do not lean to the side.';
+  } else if (shoulderDrop > SQUAT_UPRIGHT.shoulder_level_max) {
+    key = 'shoulder_uneven';
+    feedback = 'Level your shoulders and stand straight.';
+  }
+
+  return {
+    ok: !key,
+    key,
+    feedback,
+    cueKeys: key ? [key] : [],
+    values: { lean, torsoH, hipAboveAnkle, shoulderDrop },
+    stanceMode: 'upright',
   };
 }
 

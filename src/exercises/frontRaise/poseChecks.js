@@ -6,7 +6,7 @@
 // `norm` — the calibrated shoulder width once available, else the live one.
 
 import { LM } from '../../core/landmarks';
-import { FR_CFG } from './config';
+import { FR_CFG, frontRaiseAboveLimit, frontRaiseBelowLimit } from './config';
 import { mid, dist } from '../common/math';
 import { evaluateFrontStance } from '../common/frontStance';
 
@@ -120,8 +120,8 @@ export function raiseLines(g, calib) {
     : FR_CFG.rest_wrist_default;
   return {
     shoulderY: g.shY,
-    bandTopY: g.shY - FR_CFG.too_high_tolerance * n,
-    bandBottomY: g.shY + FR_CFG.top_tolerance * n,
+    bandTopY: g.shY - frontRaiseAboveLimit() * n,
+    bandBottomY: g.shY + frontRaiseBelowLimit() * n,
     returnY: g.shY + restW * (1 - FR_CFG.lift_return) * n,
   };
 }

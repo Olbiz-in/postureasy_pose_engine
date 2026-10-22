@@ -7,9 +7,7 @@ import { createScoreAverager } from '../../core/repScoring';
 import { SquatFlow, PHASE } from './SquatFlow';
 import { scoreSquatRep } from './repScore';
 import {
-  drawStandingGuideBox,
   drawStanceAnkleWidthGuides,
-  drawFootIndexGuides,
   drawAllStanceToleranceGuides,
   drawSquatRepOverlay,
 } from './draw';
@@ -64,27 +62,9 @@ function createSquatTracker(options = {}) {
     draw(ctx, landmarks, frame) {
       if (!landmarks || !lastFr) return;
 
-      if (lastFr.drawGuideBox) {
-        drawStandingGuideBox(ctx, frame.width, frame.height);
-      }
-
-      // STANCE_FOOT_WIDTH: ankle↔shoulder width guides only
-      if (lastFr.phase === PHASE.STANCE_FOOT_WIDTH && lastFr.stanceData?.stanceMode === 'width') {
+      if (lastFr.phase === PHASE.FEET_CHECK && lastFr.stanceData?.stanceMode === 'width') {
         drawStanceAnkleWidthGuides(ctx, lastFr.stanceData, frame.width, frame.height);
       }
-      // STANCE_TOE_ANGLE: toe-angle guides only (hide foot-width guide)
-      else if (lastFr.phase === PHASE.STANCE_TOE_ANGLE) {
-        if (lastFr.stanceData?.stanceMode === 'width') {
-          // Significant foot-width drift — temporarily show width guide again
-          drawStanceAnkleWidthGuides(ctx, lastFr.stanceData, frame.width, frame.height);
-        } else {
-          drawFootIndexGuides(
-            ctx, landmarks, frame.width, frame.height,
-            new Set(lastFr.stanceData?.allCues || []),
-          );
-        }
-      }
-      // Exercise / ready overlays keep the existing multi-guide form visualization
       else if (
         lastFr.stanceData &&
         lastFr.stanceData.stanceMode !== 'width' &&

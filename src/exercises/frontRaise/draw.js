@@ -4,7 +4,7 @@
 // pixel coordinates. The shared HUD (badge, counters, feedback, stance
 // checklist) lives in ../common/hud.js.
 
-import { FR_CFG } from './config';
+import { FR_CFG, frontRaiseAboveLimit, frontRaiseBelowLimit } from './config';
 import { raiseLines } from './poseChecks';
 import { FR_PHASE } from './FrontRaiseFlow';
 import {
@@ -124,7 +124,7 @@ export function drawDebugReadout(ctx, fr, w, h, mirrored) {
     `shoulderY ${g ? g.shY.toFixed(0) : '—'}px  norm ${g ? g.norm.toFixed(0) : '—'}px  torso ${g ? g.torsoDist.toFixed(0) : '—'}px`,
     `L wristDy ${f(g?.left.wristDy)} out ${f(g?.left.wristOut)} ${fr.armStates.left}`,
     `R wristDy ${f(g?.right.wristDy)} out ${f(g?.right.wristOut)} ${fr.armStates.right}`,
-    `top ≤ ${FR_CFG.top_tolerance}  high ≥ −${FR_CFG.too_high_tolerance}  flare ≤ ${FR_CFG.flare_tolerance}`,
+    `top ≤ ${frontRaiseBelowLimit().toFixed(3)} (${FR_CFG.top_tolerance}±${FR_CFG.top_calibration_tolerance})  high ≥ −${frontRaiseAboveLimit().toFixed(3)} (${FR_CFG.too_high_tolerance}±${FR_CFG.too_high_calibration_tolerance})  flare ≤ ${FR_CFG.flare_tolerance}`,
   ];
   if (fr.calib) {
     const c = fr.calib;

@@ -1,26 +1,27 @@
 // ─── useSquatFlow.js ──────────────────────────────────────────────────────────
 // Sequential AI coaching state machine for squat workflow.
 //
-// States:
-//   WAITING_FOR_PERSON  — no human detected yet
-//   CHECKING_BOUNDARY   — human present, verify full body in yellow box
-//   STANCE_FOOT_WIDTH   — ankle width ≈ shoulder width (first stance rule)
-//   STANCE_TOE_ANGLE    — left/right toe angle (only after foot width locked)
-//   READY_TO_START      — speak start cues, then begin exercise
-//   EXERCISE_ACTIVE     — squat tracking + 4 feedback types
+// States (same order as shoulder press / lateral raise / front raise):
+//   WAITING_FOR_PERSON  — camera has noticed shoulders and ankles
+//   FEET_CHECK          — ankles about shoulder width; locks once, then stops
+//   UPRIGHT_CHECK       — standing tall; locks once, then stops
+//   READY_TO_START      — stance is done; begin the exercise immediately
+//   EXERCISE_ACTIVE     — squat tracking; exercising vs standing idle
 //   DONE                — all reps complete
 //
-// IMPORTANT RULES (per spec):
-//   1. After CHECKING_BOUNDARY passes ONCE, never re-validate full body again.
-//   2. Stance order is strict: FOOT_WIDTH → lock → TOE_ANGLE → start.
+// IMPORTANT RULES:
+//   1. No guide box and no head/toe requirement. If the camera notices the
+//      shoulders and ankles, that is enough to start setup.
+//   2. Feet are checked once. Standing straight is checked once. After both
+//      pass, those checks are not repeated and the exercise starts.
 //   3. Voice repeated message cooldown = 10 seconds.
 //   4. Exercise voice: too fast, too slow, too deep, standing up too early,
 //      plus per-rep posture warnings (speed → knee → torso, one voice only).
 //   5. Only ONE live feedback active at a time.
 
 import {
-  validateFullBodyVisibility, validateStage2Framing, runAllStanceChecks,
-  checkShoulderAnkleWidth, checkStanceToeAngles, isAnkleWidthSignificantlyOut,
+  validateFullBodyVisibility, runAllStanceChecks,
+  checkShoulderAnkleWidth, evaluateSquatUpright,
   calibrateTorsoFromLandmarks, resetTorsoCalibration,
 } from './poseLogic';
 import { SquatRepTracker } from './SquatRepTracker.js';
@@ -38,20 +39,17 @@ import { lockTempoGateAtStance } from './draw.js';
 export const PHASE = {
   BODY_NOT_VISIBLE:      'body_not_visible',
   WAITING_FOR_PERSON:    'waiting_for_person',
-  CHECKING_BOUNDARY:     'checking_boundary',
-  STANCE_FOOT_WIDTH:     'stance_foot_width',
-  STANCE_TOE_ANGLE:      'stance_toe_angle',
+  FEET_CHECK:            'feet_check',
+  UPRIGHT_CHECK:         'upright_check',
   READY_TO_START:        'ready_to_start',
   EXERCISE_ACTIVE:       'exercise_active',
   DONE:                  'done',
 };
 
 // ── Timing constants ──────────────────────────────────────────────────────────
-const BOUNDARY_STABLE_SEC      = 1.0;  // hold in box before confirming
-const STANCE_PASS_HOLD_SEC     = 1.2;  // must hold a valid stance before advancing
-const STANCE_ANNOUNCE_SEC      = 2.8;  // min time in a stance step before it can pass
+const STANCE_PASS_HOLD_SEC     = 1.2;  // must hold a valid check before it locks
+const STANCE_ANNOUNCE_SEC      = 2.5;  // min time in a step before it can pass
 const STANCE_ANNOUNCE_MAX_SEC  = 7.0;  // don't block forever if TTS never ends
-const READY_TO_START_DELAY_SEC = 4.5;  // wait for "do rep one" announcement
 
 // If the full-body gate fails for at least this long, treat it as the user
 // actually leaving/re-entering the frame (as opposed to a single-frame
@@ -69,19 +67,19 @@ const VOICE_CD_MS = 10000;             // 10 second voice cooldown (spec)
 
 // ── Voice messages ────────────────────────────────────────────────────────────
 const VOICE_MSG = {
-  body_not_visible: 'Please ensure your full body is visible.',
-  move_back:        'Move back so your entire body is in the frame.',
-  head_legs_visible:'Your head and both legs must be visible.',
-  no_person:        'Please ensure your full body is visible.',
-  inside_box:       'Move back so your entire body is in the frame.',
-  head_not_visible: 'Your head and both legs must be visible.',
-  feet_not_visible: 'Your head and both legs must be visible.',
-  stance_begin:     'I am going to check your stance.',
-  foot_width_ok:    'Your foot width is okay.',
+  body_not_visible: 'Please stand in front of the camera.',
+  ankles_not_visible: 'Step back so both ankles are visible.',
+  shoulders_not_visible: 'Step back so your shoulders are visible.',
+  body_partial:     'Step back so your body is visible.',
+  no_person:        'Please stand in front of the camera.',
+  feet_begin:       'Place your feet about shoulder width apart.',
+  feet_ok:          'Your feet look good.',
   stance_narrow:    'Move your feet farther apart.',
   stance_wide:      'Bring your feet slightly closer together.',
-  stance_width_hint:'Place your feet approximately shoulder-width apart.',
-  stance_ok:        'Your stance looks good. Let\'s begin the exercise.',
+  upright_begin:    'Now stand tall and straight.',
+  not_upright:      'Stand up tall and straight.',
+  shoulder_uneven:  'Level your shoulders and stand straight.',
+  upright_ok:       'You are standing straight. Let\'s begin the exercise.',
   do_rep_one:       'Do rep one.',
   calibrate:        'Stand tall and straight so I can calibrate your squat depth.',
   too_fast:         'Too fast.',
@@ -91,7 +89,7 @@ const VOICE_MSG = {
   done:             'Congratulations. You finished every rep.',
 };
 
-const STANCE_PASSED_ALL = { foot_width: true, toe_angle: true };
+const STANCE_PASSED_ALL = { feet: true, upright: true };
 
 // ── Helpers ───────────────────────────────────────────────────────────────────
 function _baseResult(phase, overrides = {}) {
@@ -135,22 +133,15 @@ export class SquatFlow {
     this._activeFeedback = '';
     this._stancePassedChecks = {};
     this._currentStanceCheck = null;
-    this._boundaryStableStart = -1;
     this._stancePassHoldStart = -1;
     this._stanceStepEnteredAt = -1;
     this._readyStart = -1;
-    this._stanceBeginVoiceSent = false;
-    this._footWidthOkVoiceSent = false;
-    this._stanceOkVoiceSent = false;
     this._doRepOneVoiceSent = false;
     this._doneVoiceSent = false;
     this._lastInstructionKey = '';
     this._lastInstructionAt = -1;
     this._pendingInstructionKey = '';
     this._pendingInstructionSince = -1;
-    this._stillSince = -1;
-    this._prevStanceSnapshot = null;
-    this._lockedAnkleRatio = null;
     this._lastSeenRep = 0;
     this._bodyNotVisibleSince = -1;
     CFG.squat_max_reps = targetReps;
@@ -192,56 +183,7 @@ export class SquatFlow {
     this._lastInstructionAt = -1;
     this._pendingInstructionKey = '';
     this._pendingInstructionSince = -1;
-    this._stillSince = -1;
-    this._prevStanceSnapshot = null;
     this._advancePhase(phase);
-  }
-
-  _stanceSnapshot(landmarks) {
-    const ids = [
-      LM.NOSE,
-      LM.LEFT_HIP, LM.RIGHT_HIP,
-      LM.LEFT_KNEE, LM.RIGHT_KNEE,
-      LM.LEFT_ANKLE, LM.RIGHT_ANKLE,
-      LM.LEFT_FOOT_INDEX, LM.RIGHT_FOOT_INDEX,
-    ];
-    return ids.map((id) => {
-      const lm = landmarks[id];
-      return lm ? { x: lm.x, y: lm.y } : null;
-    });
-  }
-
-  _isStandingStill(landmarks, now) {
-    const snap = this._stanceSnapshot(landmarks);
-    const prev = this._prevStanceSnapshot;
-    this._prevStanceSnapshot = snap;
-    if (!prev) {
-      this._stillSince = -1;
-      return false;
-    }
-
-    let total = 0;
-    let count = 0;
-    for (let i = 0; i < snap.length; i++) {
-      const a = snap[i];
-      const b = prev[i];
-      if (!a || !b) continue;
-      total += Math.hypot(a.x - b.x, a.y - b.y);
-      count++;
-    }
-    if (count === 0) {
-      this._stillSince = -1;
-      return false;
-    }
-
-    // Reuse the existing frame-margin tolerance as the stillness threshold.
-    const avgMotion = total / count;
-    if (avgMotion > CFG.keypoint_frame_margin) {
-      this._stillSince = -1;
-      return false;
-    }
-    if (this._stillSince < 0) this._stillSince = now;
-    return (now - this._stillSince) >= STANCE_PASS_HOLD_SEC;
   }
 
   _issueInstruction(key, text, now) {
@@ -327,7 +269,8 @@ export class SquatFlow {
       cues: [{ level, text: cueText }],
       feedback: fr.activeFeedback || null,
       skeletonColor: fr.boneColor || colors[level] || colors.ok,
-      drawGuideBox: fr.drawGuideBox,
+      drawGuideBox: false,
+      activity: fr.activity || (active ? 'not_exercising' : null),
       flowPhase: fr.phase,
       stanceData: fr.stanceData,
       squatTracker: fr.squatTracker,
@@ -341,40 +284,58 @@ export class SquatFlow {
     const sq  = this._sq;
     const cur = this._phase;
     const visiblePhase = cur === PHASE.BODY_NOT_VISIBLE ? PHASE.WAITING_FOR_PERSON : cur;
+    const stanceLocked = cur === PHASE.READY_TO_START
+      || cur === PHASE.EXERCISE_ACTIVE
+      || cur === PHASE.DONE;
 
     // ═══════════════════════════════════════════════════════════════════════
-    // GLOBAL GATE — the very first check on every frame
-    // Freeze all squat processing until required landmarks are visible again.
+    // SETUP GATE — only before stance locks.
+    // Shoulders and ankles noticed by the camera are enough. No guide box,
+    // and the head does not have to be in frame. After feet + standing
+    // straight have both passed, this gate is not run again.
     // ═══════════════════════════════════════════════════════════════════════
-    const bodyGate = validateFullBodyVisibility(landmarks);
-    if (!bodyGate.ready) {
-      if (this._bodyNotVisibleSince < 0) this._bodyNotVisibleSince = now;
-      let voiceKey = 'body_not_visible';
-      let voiceMsg = VOICE_MSG.body_not_visible;
-      if (bodyGate.message === VOICE_MSG.head_legs_visible) {
-        voiceKey = 'head_legs_visible';
-        voiceMsg = VOICE_MSG.head_legs_visible;
-      } else if (bodyGate.message === VOICE_MSG.move_back) {
-        voiceKey = 'move_back';
-        voiceMsg = VOICE_MSG.move_back;
+    if (!stanceLocked) {
+      const bodyGate = validateFullBodyVisibility(landmarks);
+      if (!bodyGate.ready) {
+        if (this._bodyNotVisibleSince < 0) this._bodyNotVisibleSince = now;
+        const voiceKey = bodyGate.voiceKey || 'body_not_visible';
+        const voiceMsg = VOICE_MSG[voiceKey] || bodyGate.message;
+        this._speak(voiceMsg, { key: voiceKey, cooldownMs: VOICE_CD_MS });
+        return _baseResult(PHASE.BODY_NOT_VISIBLE, {
+          bodyState: 'BODY_NOT_VISIBLE',
+          bodyNotVisible: true,
+          poseDetected: false,
+          landmarks: null,
+          status: voiceMsg,
+          statusKind: 'fail',
+          drawGuideBox: false,
+          boneColor: COLOR_AMBER,
+          stanceData: null,
+          squatTracker: this._sq,
+          runAnalysis: false,
+          activeFeedback: voiceMsg,
+          repCount: this._repCount,
+          currentStanceCheck: this._currentStanceCheck,
+          resumePhase: visiblePhase,
+        });
       }
-      this._speak(voiceMsg, { key: voiceKey, cooldownMs: VOICE_CD_MS });
-      return _baseResult(PHASE.BODY_NOT_VISIBLE, {
+    } else if (!landmarks) {
+      if (this._bodyNotVisibleSince < 0) this._bodyNotVisibleSince = now;
+      this._speak(VOICE_MSG.no_person, { key: 'no_person', cooldownMs: VOICE_CD_MS });
+      return _baseResult(cur, {
         bodyState: 'BODY_NOT_VISIBLE',
         bodyNotVisible: true,
         poseDetected: false,
         landmarks: null,
-        status: bodyGate.message,
+        status: VOICE_MSG.no_person,
         statusKind: 'fail',
-        drawGuideBox: true,
+        drawGuideBox: false,
         boneColor: COLOR_AMBER,
-        stanceData: null,
         squatTracker: this._sq,
         runAnalysis: false,
-        activeFeedback: bodyGate.message,
+        activeFeedback: VOICE_MSG.no_person,
         repCount: this._repCount,
-        currentStanceCheck: this._currentStanceCheck,
-        resumePhase: visiblePhase,
+        stancePassedChecks: { ...STANCE_PASSED_ALL },
       });
     }
 
@@ -400,111 +361,31 @@ export class SquatFlow {
     }
 
     // ═══════════════════════════════════════════════════════════════════════
-    // PHASE: WAITING_FOR_PERSON — strict landmark availability check
+    // PHASE: WAITING_FOR_PERSON — body is in frame, start the feet check
     // ═══════════════════════════════════════════════════════════════════════
     if (visiblePhase === PHASE.WAITING_FOR_PERSON) {
-      // Person detected → advance
-      this._advancePhase(PHASE.CHECKING_BOUNDARY);
-      return _baseResult(PHASE.CHECKING_BOUNDARY, {
+      this._speak(VOICE_MSG.feet_begin, { key: 'feet_begin', cooldownMs: 0, immediate: true });
+      this._setStancePassedChecks({});
+      this._currentStanceCheck = 'feet';
+      this._enterStanceStep(PHASE.FEET_CHECK, now);
+      return _baseResult(PHASE.FEET_CHECK, {
         poseDetected: true, landmarks,
-        status: 'Person detected', statusKind: 'info',
-        drawGuideBox: true, boneColor: COLOR_GREEN,
+        status: 'Checking your feet…', statusKind: 'info',
+        drawGuideBox: false, boneColor: COLOR_GREEN,
+        stanceData: checkShoulderAnkleWidth(landmarks),
+        currentStanceCheck: 'feet',
       });
     }
 
     // ═══════════════════════════════════════════════════════════════════════
-    // PHASE: CHECKING_BOUNDARY — only check here, never again after passing
+    // FEET_CHECK — each stance width must hold, same idea as shoulder press
     // ═══════════════════════════════════════════════════════════════════════
-    if (visiblePhase === PHASE.CHECKING_BOUNDARY) {
-      const v = validateStage2Framing(landmarks, w, h);
-
-      if (v.ready) {
-        if (this._boundaryStableStart < 0) this._boundaryStableStart = now;
-        const stable = now - this._boundaryStableStart;
-
-        if (stable >= BOUNDARY_STABLE_SEC) {
-          // Boundary passed — start foot-width stance check first
-          this._boundaryStableStart = -1;
-          this._stanceBeginVoiceSent = false;
-          this._footWidthOkVoiceSent = false;
-          this._lockedAnkleRatio = null;
-          this._setStancePassedChecks({});
-          this._currentStanceCheck = 'foot_width';
-          this._enterStanceStep(PHASE.STANCE_FOOT_WIDTH, now);
-          return _baseResult(PHASE.STANCE_FOOT_WIDTH, {
-            poseDetected: true, landmarks,
-            status: 'Checking foot width…', statusKind: 'info',
-            drawGuideBox: false, boneColor: COLOR_GREEN,
-            stanceData: checkShoulderAnkleWidth(landmarks),
-            currentStanceCheck: 'foot_width',
-          });
-        }
-
-        // Not yet stable
-        return _baseResult(cur, {
-          poseDetected: true, landmarks,
-          status: 'Full body detected. Hold still…', statusKind: 'ok',
-          drawGuideBox: true, boneColor: COLOR_GREEN,
-        });
-      } else {
-        // Not in box yet — guide user (only 2 voice variants: head + feet)
-        this._boundaryStableStart = -1;
-        const kind = v.kind || 'poor_detection';
-
-        let line2 = null;
-        if (kind === 'head') line2 = VOICE_MSG.head_not_visible;
-        else if (kind === 'feet' || kind === 'legs') line2 = VOICE_MSG.feet_not_visible;
-
-        // Always say "please come inside the box" + specific issue (cooldown 10s each)
-        this._speak(VOICE_MSG.inside_box, { key: 'inside_box', cooldownMs: VOICE_CD_MS });
-        if (line2) {
-          this._speak(line2, { key: 'kind_' + kind, cooldownMs: VOICE_CD_MS });
-        }
-
-        return _baseResult(cur, {
-          poseDetected: true, landmarks,
-          status: v.message || 'Stand inside the yellow box.',
-          statusKind: 'fail',
-          drawGuideBox: true, boneColor: COLOR_AMBER,
-        });
-      }
-    }
-
-    // ═══════════════════════════════════════════════════════════════════════
-    // FROM HERE ONWARDS: never re-check person or boundary.
-    // If landmarks vanish, just show last-known and keep waiting silently.
-    // ═══════════════════════════════════════════════════════════════════════
-    // ═══════════════════════════════════════════════════════════════════════
-    // STANCE_FOOT_WIDTH — ankle width ≈ shoulder width (must pass first)
-    // ═══════════════════════════════════════════════════════════════════════
-    if (visiblePhase === PHASE.STANCE_FOOT_WIDTH) {
-      if (!this._stanceBeginVoiceSent) {
-        this._stanceBeginVoiceSent = true;
-        console.log('[Flow] Speaking stance-begin announcement');
-        this._speak(VOICE_MSG.stance_begin, {
-          key: 'stance_begin', cooldownMs: 0, immediate: true,
-        });
-      }
-
+    if (visiblePhase === PHASE.FEET_CHECK) {
       const widthCheck = checkShoulderAnkleWidth(landmarks);
-      const still = this._isStandingStill(landmarks, now);
       const stepReady = this._stanceStepReady(now);
 
-      if (!still) {
-        this._stancePassHoldStart = -1;
-        return _baseResult(cur, {
-          poseDetected: true, landmarks,
-          status: 'Stand still…', statusKind: 'info',
-          drawGuideBox: false,
-          boneColor: COLOR_AMBER,
-          stanceData: widthCheck,
-          stancePassedChecks: { ...this._stancePassedChecks },
-          currentStanceCheck: 'foot_width',
-          activeFeedback: '',
-        });
-      }
-
       if (!widthCheck.ok) {
+        this._stancePassHoldStart = -1;
         const instructionKey = widthCheck.status === 'narrow' ? 'stance_narrow' : 'stance_wide';
         this._maybeIssueInstruction(instructionKey, widthCheck.feedback, now);
         return _baseResult(cur, {
@@ -515,161 +396,105 @@ export class SquatFlow {
           boneColor: COLOR_AMBER,
           stanceData: widthCheck,
           stancePassedChecks: { ...this._stancePassedChecks },
-          currentStanceCheck: 'foot_width',
+          currentStanceCheck: 'feet',
           activeFeedback: widthCheck.feedback,
         });
       }
 
-      // Width corrected: acknowledge once, then proceed only after the user settles.
-      if (this._lastInstructionKey) {
-        this._lastInstructionKey = '';
-        this._lastInstructionAt = -1;
-      }
       this._maybeIssueInstruction(null, '', now);
 
-      if (widthCheck.ok && stepReady) {
+      if (stepReady) {
         if (this._stancePassHoldStart < 0) this._stancePassHoldStart = now;
         if (now - this._stancePassHoldStart >= STANCE_PASS_HOLD_SEC) {
-          // Lock accepted ankle-width range, then advance to toe-angle only
-          this._lockedAnkleRatio = widthCheck.ratio;
-          this._setStancePassedChecks({ foot_width: true });
-          this._footWidthOkVoiceSent = true;
-          this._currentStanceCheck = 'toe_angle';
-          // Queued (not immediate) so we don't cancel the stance intro mid-sentence
-          this._speakQueued(VOICE_MSG.foot_width_ok, { key: 'foot_width_ok' });
-          this._enterStanceStep(PHASE.STANCE_TOE_ANGLE, now);
-          return _baseResult(PHASE.STANCE_TOE_ANGLE, {
+          this._setStancePassedChecks({ feet: true });
+          this._currentStanceCheck = 'upright';
+          this._speakQueued(VOICE_MSG.feet_ok, { key: 'feet_ok' });
+          this._speakQueued(VOICE_MSG.upright_begin, { key: 'upright_begin' });
+          this._enterStanceStep(PHASE.UPRIGHT_CHECK, now);
+          return _baseResult(PHASE.UPRIGHT_CHECK, {
             poseDetected: true, landmarks,
-            status: VOICE_MSG.foot_width_ok, statusKind: 'ok',
+            status: 'Feet locked. Stand straight…', statusKind: 'ok',
             drawGuideBox: false, boneColor: COLOR_GREEN,
-            stanceData: checkStanceToeAngles(landmarks),
-            stancePassedChecks: { foot_width: true },
-            currentStanceCheck: 'toe_angle',
-            activeFeedback: VOICE_MSG.foot_width_ok,
+            stanceData: evaluateSquatUpright(landmarks),
+            stancePassedChecks: { feet: true },
+            currentStanceCheck: 'upright',
+            activeFeedback: VOICE_MSG.feet_ok,
           });
         }
-      } else if (widthCheck.ok && !stepReady) {
-        // Valid, but still announcing / showing the foot-width step
+      } else {
         this._stancePassHoldStart = -1;
       }
 
-      const waitingAnnounce = widthCheck.ok && !stepReady;
       return _baseResult(cur, {
         poseDetected: true, landmarks,
-        status: waitingAnnounce
-          ? 'Checking foot width…'
-          : (widthCheck.ok ? 'Foot width OK — hold…' : widthCheck.feedback),
-        statusKind: widthCheck.ok ? 'ok' : 'warn',
+        status: stepReady ? 'Feet look good — hold still…' : 'Checking your feet…',
+        statusKind: 'ok',
         drawGuideBox: false,
-        boneColor: widthCheck.ok ? COLOR_GREEN : COLOR_AMBER,
+        boneColor: COLOR_GREEN,
         stanceData: widthCheck,
         stancePassedChecks: { ...this._stancePassedChecks },
-        currentStanceCheck: 'foot_width',
-        activeFeedback: widthCheck.ok ? '' : widthCheck.feedback,
+        currentStanceCheck: 'feet',
       });
     }
 
     // ═══════════════════════════════════════════════════════════════════════
-    // STANCE_TOE_ANGLE — only active after foot width is locked
+    // UPRIGHT_CHECK — tall, level, not already in a squat
     // ═══════════════════════════════════════════════════════════════════════
-    if (visiblePhase === PHASE.STANCE_TOE_ANGLE) {
-      // Soft re-check: only coach foot width again if significantly outside lock
-      if (isAnkleWidthSignificantlyOut(landmarks, this._lockedAnkleRatio)) {
-        this._stancePassHoldStart = -1;
-        const widthCheck = checkShoulderAnkleWidth(landmarks);
-        const voiceKey = widthCheck.status === 'narrow' ? 'stance_narrow' : 'stance_wide';
-        this._speak(widthCheck.feedback, { key: voiceKey + '_relock', cooldownMs: VOICE_CD_MS });
-        return _baseResult(cur, {
-          poseDetected: true, landmarks,
-          status: widthCheck.feedback, statusKind: 'warn',
-          drawGuideBox: false, boneColor: COLOR_AMBER,
-          stanceData: { ...widthCheck, stanceMode: 'width' },
-          stancePassedChecks: { foot_width: true },
-          currentStanceCheck: 'toe_angle',
-          activeFeedback: widthCheck.feedback,
-        });
-      }
-
-      const toeCheck = checkStanceToeAngles(landmarks);
-      const still = this._isStandingStill(landmarks, now);
+    if (visiblePhase === PHASE.UPRIGHT_CHECK) {
+      const upright = evaluateSquatUpright(landmarks);
       const stepReady = this._stanceStepReady(now);
 
-      if (!still) {
+      if (!upright.ok) {
         this._stancePassHoldStart = -1;
+        const instructionKey = upright.key || 'not_upright';
+        this._maybeIssueInstruction(instructionKey, VOICE_MSG[instructionKey] || upright.feedback, now);
         return _baseResult(cur, {
           poseDetected: true, landmarks,
-          status: 'Stand still…', statusKind: 'info',
-          drawGuideBox: false,
-          boneColor: COLOR_AMBER,
-          stanceData: toeCheck,
-          stancePassedChecks: { foot_width: true, toe_angle: false },
-          currentStanceCheck: 'toe_angle',
-          activeFeedback: '',
-        });
-      }
-
-      if (!toeCheck.ok) {
-        const instructionKey = toeCheck.instructionKeys.join('|');
-        const instructionText = toeCheck.feedback;
-        this._maybeIssueInstruction(instructionKey, instructionText, now);
-
-        return _baseResult(cur, {
-          poseDetected: true, landmarks,
-          status: instructionText || 'Adjust your toes.',
+          status: upright.feedback,
           statusKind: 'warn',
           drawGuideBox: false,
           boneColor: COLOR_AMBER,
-          stanceData: toeCheck,
-          stancePassedChecks: { foot_width: true, toe_angle: false },
-          currentStanceCheck: 'toe_angle',
-          activeFeedback: instructionText || 'Adjust your toes.',
+          stanceData: upright,
+          stancePassedChecks: { feet: true },
+          currentStanceCheck: 'upright',
+          activeFeedback: upright.feedback,
         });
       }
 
-      if (this._lastInstructionKey) {
-        this._lastInstructionKey = '';
-        this._lastInstructionAt = -1;
-      }
       this._maybeIssueInstruction(null, '', now);
 
-      if (toeCheck.ok && stepReady) {
+      if (stepReady) {
         if (this._stancePassHoldStart < 0) this._stancePassHoldStart = now;
         if (now - this._stancePassHoldStart >= STANCE_PASS_HOLD_SEC) {
           this._stancePassHoldStart = -1;
           this._setStancePassedChecks(STANCE_PASSED_ALL);
-          this._stanceOkVoiceSent = true;
           this._doRepOneVoiceSent = false;
           this._readyStart = now;
           this._currentStanceCheck = null;
-          this._speakQueued(VOICE_MSG.stance_ok, { key: 'stance_ok' });
+          this._speakQueued(VOICE_MSG.upright_ok, { key: 'upright_ok' });
           this._advancePhase(PHASE.READY_TO_START);
           return _baseResult(PHASE.READY_TO_START, {
             poseDetected: true, landmarks,
-            status: VOICE_MSG.stance_ok, statusKind: 'ok',
+            status: VOICE_MSG.upright_ok, statusKind: 'ok',
             drawGuideBox: false, boneColor: COLOR_GREEN,
-            stanceData: toeCheck,
+            stanceData: upright,
             stancePassedChecks: { ...STANCE_PASSED_ALL },
-            activeFeedback: VOICE_MSG.stance_ok,
+            activeFeedback: VOICE_MSG.upright_ok,
           });
         }
-      } else if (toeCheck.ok && !stepReady) {
-        // Wait for "foot width is okay" to finish before allowing toe pass
+      } else {
         this._stancePassHoldStart = -1;
       }
 
-      const waitingAnnounce = toeCheck.ok && !stepReady;
       return _baseResult(cur, {
         poseDetected: true, landmarks,
-        status: waitingAnnounce
-          ? 'Checking toe angle…'
-          : (toeCheck.ok ? 'Toe angle OK — hold…' : toeCheck.feedback),
-        statusKind: toeCheck.ok ? 'ok' : 'warn',
+        status: stepReady ? 'Standing straight — hold…' : 'Checking that you are standing straight…',
+        statusKind: 'ok',
         drawGuideBox: false,
-        boneColor: toeCheck.ok ? COLOR_GREEN : COLOR_AMBER,
-        stanceData: toeCheck,
-        stancePassedChecks: { foot_width: true, toe_angle: !!(toeCheck.ok && stepReady) },
-        currentStanceCheck: 'toe_angle',
-        activeFeedback: toeCheck.ok ? '' : toeCheck.feedback,
+        boneColor: COLOR_GREEN,
+        stanceData: upright,
+        stancePassedChecks: { feet: true, upright: false },
+        currentStanceCheck: 'upright',
       });
     }
 
@@ -680,25 +505,12 @@ export class SquatFlow {
     // READY_TO_START — speak start cues + "do rep one"
     // ═══════════════════════════════════════════════════════════════════════
     if (visiblePhase === PHASE.READY_TO_START) {
-      const elapsed = now - this._readyStart;
-
-      // Stance-ok already spoken on toe-angle pass; queue "Do rep one"
-      if (!this._doRepOneVoiceSent && elapsed >= 2.0) {
+      // Stance is already locked. Do not re-check feet or posture.
+      // Start the exercise on this frame.
+      if (!this._doRepOneVoiceSent) {
         this._doRepOneVoiceSent = true;
         console.log('[Flow] Queuing "Do rep one"');
         this._speakQueued(VOICE_MSG.do_rep_one, { key: 'do_rep_one' });
-      }
-
-      // After full delay, lock tempo gate + calibrate torso reference + advance
-      if (elapsed < READY_TO_START_DELAY_SEC) {
-        return _baseResult(PHASE.READY_TO_START, {
-          poseDetected: true, landmarks,
-          status: 'Starting exercise…', statusKind: 'ok',
-          drawGuideBox: false, boneColor: COLOR_GREEN,
-          stanceData: checks,
-          stancePassedChecks: { ...STANCE_PASSED_ALL },
-          activeFeedback: 'Get ready…',
-        });
       }
 
       lockTempoGateAtStance(sq, landmarks, h);
@@ -864,10 +676,12 @@ export class SquatFlow {
       if (sq.tooDeep) boneColor = COLOR_RED;
       else if (sq._inSquat && checks.allCues.length > 0) boneColor = COLOR_AMBER;
 
+      const working = !!sq._inSquat;
       return _baseResult(PHASE.EXERCISE_ACTIVE, {
         poseDetected: true, landmarks,
-        status: feedbackText || (sq._inSquat ? 'Squatting…' : (sq.isCalibrated ? 'Standing' : `Calibrating (${sq.calibrationPct}%)`)),
+        status: feedbackText || (working ? 'Exercising' : (sq.isCalibrated ? 'Not exercising' : `Stand tall to calibrate (${sq.calibrationPct}%)`)),
         statusKind: feedbackText ? 'warn' : 'ok',
+        activity: working ? 'exercising' : 'not_exercising',
         drawGuideBox: false, boneColor,
         stanceData: checks,
         squatTracker: sq, runAnalysis: true,
@@ -908,23 +722,16 @@ export class SquatFlow {
     resetTorsoCalibration();
     this._phase = PHASE.WAITING_FOR_PERSON;
 
-    this._boundaryStableStart = -1;
     this._stancePassHoldStart = -1;
     this._stanceStepEnteredAt = -1;
     this._readyStart          = -1;
 
-    this._stanceBeginVoiceSent = false;
-    this._footWidthOkVoiceSent = false;
-    this._stanceOkVoiceSent = false;
     this._doRepOneVoiceSent = false;
     this._doneVoiceSent     = false;
     this._lastInstructionKey = '';
     this._lastInstructionAt = -1;
     this._pendingInstructionKey = '';
     this._pendingInstructionSince = -1;
-    this._stillSince = -1;
-    this._prevStanceSnapshot = null;
-    this._lockedAnkleRatio  = null;
     this._lastSeenRep       = 0;
     this._bodyNotVisibleSince = -1;
 

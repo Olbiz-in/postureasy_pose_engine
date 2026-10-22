@@ -170,7 +170,8 @@ export const FRONT_RAISE_TOLERANCE_GROUPS = [
     title: 'Shoulder Line (reps)',
     color: '#4ecdc4',
     sliders: [
-      { key: 'top_tolerance', label: 'Top: wrist below line (max)', min: 0.02, max: 0.35, step: 0.005 },
+      { key: 'top_tolerance', label: 'Top: wrist below line (max)', min: -0.5, max: 0.5, step: 0.005 },
+      { key: 'top_calibration_tolerance', label: 'Calibration tolerance (±)', min: -0.5, max: 0.5, step: 0.005 },
       { key: 'lift_start', label: 'Rep start (lift fraction)', min: 0.2, max: 0.7, step: 0.01 },
       { key: 'lift_return', label: 'Rep end (lift fraction)', min: 0.05, max: 0.5, step: 0.01 },
       { key: 'pair_window_sec', label: 'Both-arm window (s)', min: 0.2, max: 2.0, step: 0.05 },
@@ -180,7 +181,8 @@ export const FRONT_RAISE_TOLERANCE_GROUPS = [
     title: 'Form Rules',
     color: '#f59e0b',
     sliders: [
-      { key: 'too_high_tolerance', label: 'Wrist above line (max)', min: 0, max: 0.5, step: 0.005 },
+      { key: 'too_high_tolerance', label: 'Wrist above line (max)', min: 0, max: 1, step: 0.005 },
+      { key: 'too_high_calibration_tolerance', label: 'Calibration tolerance (±)', min: -0.5, max: 0.5, step: 0.005 },
       { key: 'flare_tolerance', label: 'Arms drifting out (× shoulder width)', min: 0.1, max: 0.8, step: 0.005 },
       { key: 'lean_tolerance', label: 'Lean back (torso length change)', min: 0.02, max: 0.2, step: 0.005 },
       { key: 'shoulder_tilt_max', label: 'Shoulder tilt (max)', min: 0.03, max: 0.3, step: 0.005 },

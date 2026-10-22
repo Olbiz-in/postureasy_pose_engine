@@ -85,3 +85,11 @@ similar movements (squat-like, push-like, hold-like), build a shared template in
 
 See `src/core/registry.js` for the full `ExerciseDefinition`, `Tracker`, and
 `ExerciseState` contracts.
+
+PS D:\AIDS\company\postureasy> cd d:\AIDS\company\postureasy\postureasy_pose_engine
+>> git add .
+>> git commit -m "correction" 
+>> git push origin main
+>> 
+>> git tag -a v0.1.12 -m "v0.1.12"
+>> git push origin v0.1.12

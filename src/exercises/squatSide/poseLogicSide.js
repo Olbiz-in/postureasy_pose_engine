@@ -1,109 +1,92 @@
-// Side-view squat pose logic — mirrors front-view framing/stance checks with
-// profile-specific landmark selection. Reuses guide-box geometry from squat/poseLogic.
+// Side-view squat pose logic. Setup only needs the camera to notice the
+// shoulder and ankle on the visible side. There is no guide box.
 
-import { LM } from '../../core/landmarks';
-import {
-  CFG,
-  MSG_HEAD,
-  MSG_LEGS,
-  MSG_FEET,
-  MSG_TOO_CLOSE,
-  MSG_TOO_FAR,
-  MSG_POOR_DETECTION,
-} from '../squat/config.js';
-import { getGuideBoxRect } from '../squat/poseLogic.js';
+import { CFG } from '../squat/config.js';
 import { pickVisibleSide, checkTorsoLeanSide } from './SideSquatRepTracker.js';
 
-function landmarkConfident(lm, visMin, frameMargin, bottomMargin) {
-  const bottom = bottomMargin != null ? bottomMargin : frameMargin;
-  return (
-    lm.visibility >= visMin
-    && lm.x > frameMargin && lm.x < 1.0 - frameMargin
-    && lm.y > frameMargin && lm.y < 1.0 - bottom
-  );
-}
-
-function sideBodyFitsGuideBox(landmarks, vis, w, h) {
-  const [x1, y1, x2, y2] = getGuideBoxRect(w, h);
-  const padX = CFG.guide_box_inner_pad_ratio / Math.max(w, 1);
-  const padY = CFG.guide_box_inner_pad_ratio / Math.max(h, 1);
-  const nx1 = x1 / w + padX;
-  const ny1 = y1 / h + padY;
-  const nx2 = x2 / w - padX;
-  const ny2 = y2 / h - padY;
-
-  const nose = landmarks[LM.NOSE];
-  const ankle = vis.ankle;
-  for (const lm of [nose, ankle]) {
-    if (lm.x < nx1 || lm.x > nx2 || lm.y < ny1 || lm.y > ny2) {
-      return [false, MSG_TOO_CLOSE, 'box_overflow'];
-    }
-  }
-
-  const boxHNorm = (y2 - y1) / Math.max(h, 1);
-  const bodyHNorm = ankle.y - nose.y;
-  if (bodyHNorm < boxHNorm * CFG.guide_box_min_body_fill_ratio) {
-    return [false, MSG_TOO_FAR, 'too_far'];
-  }
-  return [true, '', 'ok'];
+function landmarkNoticed(lm, visMin) {
+  if (!lm) return false;
+  const v = lm.visibility == null ? 1 : lm.visibility;
+  return v >= visMin && Number.isFinite(lm.x) && Number.isFinite(lm.y);
 }
 
 /**
- * Full-body visibility + guide-box check for side profile (same messages as front view).
+ * Side-view setup gate. The camera only has to notice one shoulder and the
+ * ankle on that side (hip and knee in between). No guide box, and the head
+ * does not have to be in frame.
  */
-export function validateSideStage2Framing(landmarks, w, h) {
-  const visMin = CFG.keypoint_vis_min;
-  const margin = CFG.keypoint_frame_margin;
-  const bottom = CFG.keypoint_bottom_margin;
-
+export function validateSideBody(landmarks) {
   if (!landmarks) {
     return {
-      ready: false, message: MSG_POOR_DETECTION, kind: 'poor_detection',
+      ready: false,
+      message: 'Please stand in front of the camera.',
+      kind: 'body_not_visible',
       gateHead: false, gateUpper: false, gateLower: false, vis: null,
     };
   }
 
-  const nose = landmarks[LM.NOSE];
-  if (!landmarkConfident(nose, visMin, margin, null)) {
-    return {
-      ready: false, message: MSG_HEAD, kind: 'head',
-      gateHead: false, gateUpper: true, gateLower: true, vis: null,
-    };
-  }
-
   const vis = pickVisibleSide(landmarks);
-  if (!vis) {
-    return {
-      ready: false, message: MSG_POOR_DETECTION, kind: 'poor_detection',
-      gateHead: true, gateUpper: false, gateLower: false, vis: null,
-    };
-  }
+  const visMin = CFG.keypoint_vis_min;
+  const shoulderOk = vis && landmarkNoticed(vis.shoulder, visMin);
+  const ankleOk = vis && landmarkNoticed(vis.ankle, visMin);
+  const chainOk = vis
+    && landmarkNoticed(vis.hip, visMin)
+    && landmarkNoticed(vis.knee, visMin);
 
-  const chain = [vis.shoulder, vis.hip, vis.knee, vis.ankle];
-  for (const lm of chain) {
-    const isLower = lm === vis.ankle || lm === vis.knee;
-    if (!landmarkConfident(lm, visMin * 0.5, margin, isLower ? bottom : null)) {
-      const msg = isLower ? MSG_FEET : MSG_LEGS;
-      const kind = isLower ? 'feet' : 'legs';
-      return {
-        ready: false, message: msg, kind,
-        gateHead: true, gateUpper: !isLower, gateLower: isLower, vis,
-      };
-    }
-  }
-
-  const [boxOk, boxMsg, boxKind] = sideBodyFitsGuideBox(landmarks, vis, w, h);
-  if (!boxOk) {
+  if (shoulderOk && ankleOk && chainOk) {
     return {
-      ready: false, message: boxMsg, kind: boxKind,
+      ready: true, message: '', kind: 'ok',
       gateHead: true, gateUpper: true, gateLower: true, vis,
     };
   }
 
+  let message = 'Please stand in front of the camera.';
+  if (vis && !ankleOk) message = 'Step back so your ankle is visible.';
+  else if (vis && !shoulderOk) message = 'Step back so your shoulder is visible.';
+  else if (vis) message = 'Step back so your body is visible.';
+
   return {
-    ready: true, message: '', kind: 'ok',
-    gateHead: true, gateUpper: true, gateLower: true, vis,
+    ready: false, message, kind: 'body_not_visible',
+    gateHead: false, gateUpper: !!shoulderOk, gateLower: !!ankleOk, vis: vis || null,
   };
+}
+
+function kneeAngleDeg(hip, knee, ankle) {
+  const ax = hip.x - knee.x;
+  const ay = hip.y - knee.y;
+  const bx = ankle.x - knee.x;
+  const by = ankle.y - knee.y;
+  const mag = Math.hypot(ax, ay) * Math.hypot(bx, by);
+  if (mag < 1e-6) return 180;
+  const cos = Math.max(-1, Math.min(1, (ax * bx + ay * by) / mag));
+  return (Math.acos(cos) * 180) / Math.PI;
+}
+
+/** Setup only: the visible leg should be straight before the set starts. */
+export function checkSideLegStraight(landmarks) {
+  const vis = pickVisibleSide(landmarks);
+  if (!vis) {
+    return {
+      ok: false, angle: 0, vis: null, key: 'legs_not_visible',
+      feedback: 'Step back so your leg is visible.',
+      allCues: ['legs_not_visible'],
+    };
+  }
+  const angle = kneeAngleDeg(vis.hip, vis.knee, vis.ankle);
+  const ok = angle >= 155;
+  return {
+    ok,
+    angle,
+    vis,
+    key: ok ? null : 'legs_bent',
+    feedback: ok ? 'Your leg looks straight.' : 'Straighten your leg.',
+    allCues: ok ? [] : ['legs_bent'],
+  };
+}
+
+/** Same camera-notice gate as validateSideBody. Width and height are ignored. */
+export function validateSideStage2Framing(landmarks, _w, _h) {
+  return validateSideBody(landmarks);
 }
 
 /** Standing-straight check (replaces front-view stance width/foot checks). */
