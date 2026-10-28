@@ -3,6 +3,7 @@
 
 import { CFG, CFG_DEFAULTS, resetSquatCfg } from './squat/config.js';
 import { PUSHUP_CFG } from './pushup/config.js';
+import { SIDE_PUSHUP_CFG } from './pushupSide/config.js';
 import { SP_CFG, SP_CFG_DEFAULTS, resetShoulderPressCfg } from './shoulderPress/config.js';
 import { LR_CFG, LR_CFG_DEFAULTS, resetLateralRaiseCfg } from './lateralRaise/config.js';
 import { FR_CFG, FR_CFG_DEFAULTS, resetFrontRaiseCfg } from './frontRaise/config.js';
@@ -15,6 +16,25 @@ export const PUSHUP_CFG_DEFAULTS = {
   elbow_align_ratio_max: 0.05,
   wrist_elbow_collinear_ratio_max: 0.06,
   knee_align_ratio_max: 0.12,
+};
+
+/** Side-view keys live on SIDE_PUSHUP_CFG; front arm keys on PUSHUP_CFG. */
+const SIDE_PUSHUP_TOLERANCE_KEYS = new Set([
+  'down_threshold',
+  'up_threshold',
+  'back_straight_tol_deg',
+  'back_hip_dev_ratio_max',
+  'hand_forward_ratio_max',
+  'hand_low_ratio_max',
+]);
+
+export const SIDE_PUSHUP_CFG_DEFAULTS = {
+  down_threshold: 105,
+  up_threshold: 150,
+  back_straight_tol_deg: 12.0,
+  back_hip_dev_ratio_max: 0.12,
+  hand_forward_ratio_max: 0.18,
+  hand_low_ratio_max: 0.55,
 };
 
 export const SQUAT_TOLERANCE_GROUPS = [
@@ -66,12 +86,30 @@ export const SQUAT_TOLERANCE_GROUPS = [
 
 export const PUSHUP_TOLERANCE_GROUPS = [
   {
-    title: 'Arm Alignment',
+    title: 'Arm Alignment (front view)',
     color: '#4ecdc4',
     sliders: [
       { key: 'wrist_align_ratio_max', label: 'Wrist tolerance', min: 0.02, max: 0.35, step: 0.005 },
       { key: 'elbow_align_ratio_max', label: 'Elbow tolerance', min: 0.02, max: 0.35, step: 0.005 },
       { key: 'wrist_elbow_collinear_ratio_max', label: 'Forearm straightness', min: 0.01, max: 0.20, step: 0.005 },
+    ],
+  },
+  {
+    title: 'Rep counting (side view)',
+    color: '#f59e0b',
+    sliders: [
+      { key: 'down_threshold', label: 'Enter DOWN below (°)', min: 80, max: 120, step: 1 },
+      { key: 'up_threshold', label: 'Count / lockout above (°)', min: 130, max: 170, step: 1 },
+    ],
+  },
+  {
+    title: 'Side form',
+    color: '#5b8dee',
+    sliders: [
+      { key: 'back_straight_tol_deg', label: 'Back straight tolerance (°)', min: 5, max: 25, step: 1 },
+      { key: 'back_hip_dev_ratio_max', label: 'Hip off line (max)', min: 0.04, max: 0.3, step: 0.005 },
+      { key: 'hand_forward_ratio_max', label: 'Hands forward (max)', min: 0.05, max: 0.4, step: 0.01 },
+      { key: 'hand_low_ratio_max', label: 'Hands low (max)', min: 0.25, max: 0.9, step: 0.01 },
     ],
   },
 ];
@@ -386,6 +424,50 @@ export function getSquatToleranceConfig() {
   return { CFG, defaults: CFG_DEFAULTS, reset: resetSquatCfg };
 }
 
+/**
+ * Unified push-up CFG for the settings panel: front arm keys write PUSHUP_CFG,
+ * side counting / form keys write SIDE_PUSHUP_CFG.
+ */
 export function getPushUpToleranceConfig() {
-  return { CFG: PUSHUP_CFG, defaults: { ...PUSHUP_CFG, ...PUSHUP_CFG_DEFAULTS } };
+  const defaults = {
+    ...PUSHUP_CFG,
+    ...PUSHUP_CFG_DEFAULTS,
+    ...SIDE_PUSHUP_CFG_DEFAULTS,
+  };
+  const CFG = new Proxy(
+    {},
+    {
+      get(_t, key) {
+        if (typeof key === 'symbol') return undefined;
+        if (SIDE_PUSHUP_TOLERANCE_KEYS.has(key)) return SIDE_PUSHUP_CFG[key];
+        return PUSHUP_CFG[key];
+      },
+      set(_t, key, value) {
+        if (SIDE_PUSHUP_TOLERANCE_KEYS.has(key)) {
+          SIDE_PUSHUP_CFG[key] = value;
+          return true;
+        }
+        PUSHUP_CFG[key] = value;
+        return true;
+      },
+      has(_t, key) {
+        return SIDE_PUSHUP_TOLERANCE_KEYS.has(key) || Object.prototype.hasOwnProperty.call(PUSHUP_CFG, key);
+      },
+      ownKeys() {
+        return [...new Set([...Object.keys(PUSHUP_CFG), ...SIDE_PUSHUP_TOLERANCE_KEYS])];
+      },
+      getOwnPropertyDescriptor(_t, key) {
+        if (!SIDE_PUSHUP_TOLERANCE_KEYS.has(key) && !Object.prototype.hasOwnProperty.call(PUSHUP_CFG, key)) {
+          return undefined;
+        }
+        return {
+          configurable: true,
+          enumerable: true,
+          writable: true,
+          value: SIDE_PUSHUP_TOLERANCE_KEYS.has(key) ? SIDE_PUSHUP_CFG[key] : PUSHUP_CFG[key],
+        };
+      },
+    },
+  );
+  return { CFG, defaults };
 }

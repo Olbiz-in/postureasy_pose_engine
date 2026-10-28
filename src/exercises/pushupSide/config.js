@@ -1,11 +1,21 @@
-// Side-view push-up thresholds + posture config. Ported verbatim from the
-// fitness_posture sidePushupConstants.
+// Side-view push-up thresholds + posture config. Ported from fitness_posture
+// sidePushupConstants; counting thresholds aligned with backend pushup_rep
+// (max_bottom_deg 105 / min_lockout_deg 155) so typical side-camera 2D elbow
+// angles still register a rep.
 
-export const SIDE_PUSHUP_DOWN_THRESHOLD = 90;
+/** @deprecated Prefer SIDE_PUSHUP_CFG.down_threshold — kept for imports. */
+export const SIDE_PUSHUP_DOWN_THRESHOLD = 105;
+/** @deprecated Prefer SIDE_PUSHUP_CFG.up_threshold — kept for imports. */
 export const SIDE_PUSHUP_UP_THRESHOLD = 150;
-export const SIDE_PUSHUP_MIN_VIS = 0.6;
+export const SIDE_PUSHUP_MIN_VIS = 0.55;
 
 export const SIDE_PUSHUP_CFG = {
+  // Rep FSM: elbow angle (deg). DOWN when below down_threshold; count on
+  // return above up_threshold. Must stay looser than the form depth band so
+  // shallow reps still count (and get a "not deep enough" cue).
+  down_threshold: 105,
+  up_threshold: 150,
+
   back_straight_target_deg: 175.0,
   back_straight_tol_deg: 12.0,
   back_sag_threshold_deg: 155.0,
@@ -13,6 +23,7 @@ export const SIDE_PUSHUP_CFG = {
   back_near_limit_fraction: 0.85,
   back_hip_dev_ratio_max: 0.12,
 
+  // Fallback depth band — live form prefers getPushUpDepthBand() (global angle tol).
   depth_target_min: 80.0,
   depth_target_max: 100.0,
   depth_too_deep_threshold: 70.0,
@@ -26,7 +37,9 @@ export const SIDE_PUSHUP_CFG = {
   hand_low_ratio_max: 0.55,
 
   near_limit_fraction: 0.85,
-  min_visibility: 0.55,
+  min_visibility: 0.5,
+  /** Prefer sticking to the last camera-facing side unless the other is clearly better. */
+  side_switch_vis_margin: 0.9,
 
   pushup_max_reps: 0,
 };

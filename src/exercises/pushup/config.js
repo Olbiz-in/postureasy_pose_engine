@@ -74,8 +74,8 @@ export const FORM_COLORS = {
 
 export const PUSHUP_VOICE_MSG = {
   no_person: 'No person detected.',
-  upper_body_ok: 'Upper body visible. Get into push-up position when ready.',
-  ready_to_start: 'Starting push-up exercise. Do rep one.',
+  start_exercise: 'Start the exercise.',
+  ready_to_start: 'Start the exercise. Do rep one.',
   done: 'Congratulations. You finished every rep.',
   wrist_left_inner: 'Move your left wrist inward.',
   wrist_left_outer: 'Move your left wrist outward.',

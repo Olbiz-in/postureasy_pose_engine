@@ -1,10 +1,9 @@
 // ─── usePushUpFlow.js ─────────────────────────────────────────────────────────
 // Push-up exercise state machine hook.
-// Simpler than squats — no stance phases, upper body tracking only.
+// No stance phases — arms visible → start counting + posture feedback immediately.
 //
 // States:
 //   WAITING_FOR_PERSON  — no upper body detected
-//   READY_TO_START      — upper body visible, brief setup delay + voice announcement
 //   EXERCISE_ACTIVE     — rep counting + posture feedback
 //   DONE                — all target reps complete
 //
@@ -13,7 +12,6 @@
 
 import { VoiceManager } from '../../core/voiceManager.js';
 import { primeSetIntro } from '../../core/sessionVoice.js';
-import { nowSec }          from '../../core/landmarks.js';
 import {
   PUSHUP_CFG, PUSHUP_VOICE_MSG,
   PUSHUP_COLOR_GREEN, PUSHUP_COLOR_AMBER, PUSHUP_COLOR_RED,
@@ -35,14 +33,14 @@ import { RepeatMistakeGate } from '../common/repeatMistakeGate.js';
 // ── Phase constants ────────────────────────────────────────────────────────────
 export const PUSHUP_PHASE = {
   WAITING_FOR_PERSON: 'pu_waiting_for_person',
+  /** @deprecated Kept for older UI checks; flow no longer enters this phase. */
   READY_TO_START:     'pu_ready_to_start',
   EXERCISE_ACTIVE:    'pu_exercise_active',
   DONE:               'pu_done',
 };
 
-const VOICE_CD_MS     = 10_000;  // 10-second cooldown (same spec as squats)
-const READY_DELAY_SEC = 3.5;     // delay after voice announcement before exercise starts
-const DO_REP_ONE_MSG  = 'Do rep one.';
+const VOICE_CD_MS    = 10_000;  // 10-second cooldown (same spec as squats)
+const DO_REP_ONE_MSG = 'Do rep one.';
 
 function selectLiveErrorKey(postureResult) {
   if (!postureResult?.cueKeys?.length) return null;
@@ -84,8 +82,7 @@ export class PushUpFlow {
     this._phase = PUSHUP_PHASE.WAITING_FOR_PERSON;
     this._repCount = 0;
     this._activeFeedback = '';
-    this._readyStart = -1;
-    this._readyVoiceSent = false;
+    this._startVoiceSent = false;
     this._doneVoiceSent = false;
     this._lastLiveCueKey = '';
     PUSHUP_CFG.pushup_max_reps = targetReps;
@@ -136,77 +133,33 @@ export class PushUpFlow {
   }
 
   tick(landmarks) {
-  
-    const now = nowSec();
     const rep = this._rep;
     const cur = this._phase;
 
-    // ══ WAITING_FOR_PERSON ══════════════════════════════════════════════════
-    if (cur === PUSHUP_PHASE.WAITING_FOR_PERSON) {
+    // ══ WAITING_FOR_PERSON — arms visible → start counting immediately (no stance) ══
+    if (cur === PUSHUP_PHASE.WAITING_FOR_PERSON || cur === PUSHUP_PHASE.READY_TO_START) {
       if (!landmarks || !pushupLandmarksVisible(landmarks)) {
         this._speak(PUSHUP_VOICE_MSG.no_person, { key: 'pu_no_person', cooldownMs: VOICE_CD_MS });
-        return _baseResult(cur, {
-          status: 'No person detected', statusKind: 'fail',
-          pushupTracker: rep,
-        });
-      }
-      // Upper body visible → move to ready
-      this._readyStart    = now;
-      this._readyVoiceSent = false;
-      this._advancePhase(PUSHUP_PHASE.READY_TO_START);
-      return _baseResult(PUSHUP_PHASE.READY_TO_START, {
-        poseDetected: true, landmarks,
-        status: 'Position detected', statusKind: 'ok',
-        pushupTracker: rep,
-      });
-    }
-
-    // ══ READY_TO_START ═══════════════════════════════════════════════════════
-    if (cur === PUSHUP_PHASE.READY_TO_START) {
-      if (!landmarks || !pushupLandmarksVisible(landmarks)) {
-        // Lost person → back to waiting
-        this._readyStart = -1;
-        this._advancePhase(PUSHUP_PHASE.WAITING_FOR_PERSON);
         return _baseResult(PUSHUP_PHASE.WAITING_FOR_PERSON, {
           status: 'No person detected', statusKind: 'fail',
           pushupTracker: rep,
         });
       }
-
-      const elapsed = now - this._readyStart;
-
-      // Speak announcement once after a brief 0.5s settle
-      if (!this._readyVoiceSent && elapsed >= 0.5) {
-        this._readyVoiceSent = true;
-        console.log('[PushUpFlow] Speaking upper-body-ok announcement');
-        this._speak(PUSHUP_VOICE_MSG.upper_body_ok, {
-          key: 'pu_upper_body_ok', cooldownMs: 0, immediate: true,
+      if (!this._startVoiceSent) {
+        this._startVoiceSent = true;
+        this._speak(PUSHUP_VOICE_MSG.start_exercise, {
+          key: 'pu_start_exercise', cooldownMs: 0, immediate: true,
         });
-      }
-
-      // After delay, queue "Do rep one" and start (same rep prompt as squat)
-      if (this._readyVoiceSent && elapsed >= READY_DELAY_SEC) {
         this._speakQueued(DO_REP_ONE_MSG, { key: 'pu_do_rep_one' });
-        this._advancePhase(PUSHUP_PHASE.EXERCISE_ACTIVE);
-        return _baseResult(PUSHUP_PHASE.EXERCISE_ACTIVE, {
-          poseDetected: true, landmarks,
-          status: 'Starting…', statusKind: 'ok',
-          runAnalysis: true, pushupTracker: rep,
-        });
       }
-
-      return _baseResult(cur, {
-        poseDetected: true, landmarks,
-        status: 'Get into push-up position…', statusKind: 'ok',
-        activeFeedback: 'Get ready…',
-        pushupTracker: rep,
-      });
+      this._advancePhase(PUSHUP_PHASE.EXERCISE_ACTIVE);
+      // Fall through to EXERCISE_ACTIVE on the same frame.
     }
 
     // ══ EXERCISE_ACTIVE — rep flow matches squat: live cues during rep, next-rep prompt on complete ══
-    if (cur === PUSHUP_PHASE.EXERCISE_ACTIVE) {
+    if (this._phase === PUSHUP_PHASE.EXERCISE_ACTIVE) {
       if (!landmarks) {
-        return _baseResult(cur, {
+        return _baseResult(PUSHUP_PHASE.EXERCISE_ACTIVE, {
           status: 'Hold position…', statusKind: 'info',
           repCount: rep.count, pushupState: rep.state,
           elbowAngle: rep.smoothAngle, runAnalysis: false,
@@ -297,7 +250,7 @@ export class PushUpFlow {
         else if (postureResult.skeletonColorKey === 'yellow') boneColor = PUSHUP_COLOR_AMBER;
       }
 
-      return _baseResult(cur, {
+      return _baseResult(PUSHUP_PHASE.EXERCISE_ACTIVE, {
         poseDetected: true, landmarks, boneColor,
         status: feedbackText || this._activeFeedback || (rep.state === 'DOWN' ? 'Lowering…' : 'Pushing up…'),
         statusKind: postureResult?.primaryColorKey === 'red' ? 'warn' : 'ok',
@@ -326,9 +279,8 @@ export class PushUpFlow {
     this._rep  = new PushUpRepTracker();
     this._repAccum = createEmptyRepAccumulator();
     this._mistakeGate.reset();
-    this._phase        = PUSHUP_PHASE.WAITING_FOR_PERSON;
-    this._readyStart   = -1;
-    this._readyVoiceSent = false;
+    this._phase          = PUSHUP_PHASE.WAITING_FOR_PERSON;
+    this._startVoiceSent = false;
     this._doneVoiceSent  = false;
     this._repCount = 0;
     this._activeFeedback = '';

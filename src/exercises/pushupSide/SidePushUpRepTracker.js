@@ -2,10 +2,9 @@
 // Faithful port of fitness_posture sidePushupTracker.
 
 import { LM, nowSec } from '../../core/landmarks';
+import { getPushUpDepthBand } from '../../core/trackingSettings';
 import {
   SIDE_PUSHUP_CFG as CFG,
-  SIDE_PUSHUP_DOWN_THRESHOLD,
-  SIDE_PUSHUP_UP_THRESHOLD,
   SIDE_PUSHUP_MIN_VIS,
 } from './config';
 
@@ -43,17 +42,40 @@ function lm(landmarks, side, name) {
   return landmarks[SIDE_LM[side][name]];
 }
 
-export function detectVisibleSide(landmarks) {
-  if (!landmarks) return 'left';
+/**
+ * Pick the camera-facing side. When `preferred` is set, keep it unless the
+ * other side's visibility sum beats it by `side_switch_vis_margin` — stops
+ * left/right flip-flops from scrambling the elbow-angle signal mid-rep.
+ */
+export function detectVisibleSide(landmarks, preferred = null) {
+  if (!landmarks) return preferred || 'left';
   let leftVis = 0;
   let rightVis = 0;
   for (const k of SIDE_NAMES) {
-    leftVis += lm(landmarks, 'left', k).visibility;
-    rightVis += lm(landmarks, 'right', k).visibility;
+    leftVis += lm(landmarks, 'left', k).visibility ?? 0;
+    rightVis += lm(landmarks, 'right', k).visibility ?? 0;
   }
-  return leftVis >= rightVis ? 'left' : 'right';
+  const better = leftVis >= rightVis ? 'left' : 'right';
+  if (!preferred || preferred === better) return better;
+  const prefVis = preferred === 'left' ? leftVis : rightVis;
+  const otherVis = preferred === 'left' ? rightVis : leftVis;
+  if (otherVis - prefVis >= CFG.side_switch_vis_margin) return better;
+  return preferred;
 }
 
+/** Arms only — enough to start counting (no side-stance / full-profile gate). */
+const ARM_LM_NAMES = ['shoulder', 'elbow', 'wrist'];
+
+export function sidePushupArmLandmarksVisible(landmarks) {
+  if (!landmarks) return false;
+  const side = detectVisibleSide(landmarks);
+  for (const name of ARM_LM_NAMES) {
+    if (lm(landmarks, side, name).visibility < SIDE_PUSHUP_MIN_VIS) return false;
+  }
+  return true;
+}
+
+/** Full profile (arms + hip/leg) — used for posture overlay when available. */
 export function sidePushupLandmarksVisible(landmarks) {
   if (!landmarks) return false;
   const side = detectVisibleSide(landmarks);
@@ -158,8 +180,9 @@ export function checkShoulderLineTooDeep(landmarks, visibleSide, pushupState) {
 
 export function checkPushUpDepth(elbowAngle, pushupState, landmarks, visibleSide) {
   if (pushupState !== 'DOWN') return { ok: true, near: false, cueKeys: [], label: 'GOOD FORM', colorKey: 'green' };
-  const tooDeepAngle = elbowAngle < CFG.depth_too_deep_threshold;
-  const inRange = CFG.depth_target_min <= elbowAngle && elbowAngle <= CFG.depth_target_max;
+  const band = getPushUpDepthBand();
+  const tooDeepAngle = elbowAngle < band.tooDeep;
+  const inRange = band.min <= elbowAngle && elbowAngle <= band.max;
   let shoulderTouching = false;
   let shoulderNear = false;
   const shoulderCues = [];
@@ -174,16 +197,17 @@ export function checkPushUpDepth(elbowAngle, pushupState, landmarks, visibleSide
   cues.push(...shoulderCues);
   if (tooDeep) return { ok: false, near: false, cueKeys: cues, label: 'TOO DEEP', colorKey: 'red' };
   if (inRange && !shoulderNear) return { ok: true, near: false, cueKeys: [], label: 'GOOD FORM', colorKey: 'green' };
-  if (elbowAngle > CFG.depth_target_max) return { ok: false, near: true, cueKeys: ['pushup_not_deep_enough'], label: 'NOT DEEP ENOUGH', colorKey: 'yellow' };
-  const near = elbowAngle < CFG.depth_target_min || shoulderNear;
+  if (elbowAngle > band.max) return { ok: false, near: true, cueKeys: ['pushup_not_deep_enough'], label: 'NOT DEEP ENOUGH', colorKey: 'yellow' };
+  const near = elbowAngle < band.min || shoulderNear;
   return { ok: true, near, cueKeys: [], label: 'GOOD FORM', colorKey: near ? 'yellow' : 'green' };
 }
 
 export function checkFullExtension(elbowAngle, pushupState) {
   if (pushupState !== 'UP') return { ok: true, near: false, cueKeys: [], label: 'Extension: OK', colorKey: 'green' };
-  const ok = elbowAngle >= CFG.full_extension_min_deg;
-  const nearLo = CFG.full_extension_min_deg - CFG.partial_extension_tol_deg;
-  const near = ok && elbowAngle < CFG.full_extension_min_deg + CFG.partial_extension_tol_deg;
+  const minDeg = CFG.up_threshold;
+  const ok = elbowAngle >= minDeg;
+  const nearLo = minDeg - CFG.partial_extension_tol_deg;
+  const near = ok && elbowAngle < minDeg + CFG.partial_extension_tol_deg;
   if (!ok) {
     return { ok: false, near: elbowAngle >= nearLo, cueKeys: ['pushup_partial_extension'], label: 'PARTIAL REP', colorKey: 'red' };
   }
@@ -281,7 +305,7 @@ export class SidePushUpRepTracker {
   }
 
   updateAngle(landmarks) {
-    this.visibleSide = detectVisibleSide(landmarks);
+    this.visibleSide = detectVisibleSide(landmarks, this.visibleSide);
     const sh = lm(landmarks, this.visibleSide, 'shoulder');
     const el = lm(landmarks, this.visibleSide, 'elbow');
     const wr = lm(landmarks, this.visibleSide, 'wrist');
@@ -293,9 +317,11 @@ export class SidePushUpRepTracker {
 
   detectAndCount(angle) {
     if (!Number.isFinite(angle) || angle < 1) return false;
+    const downAt = CFG.down_threshold;
+    const upAt = CFG.up_threshold;
     const prevState = this.state;
-    if (this.state === 'UP' && angle < SIDE_PUSHUP_DOWN_THRESHOLD) this.state = 'DOWN';
-    if (this.state === 'DOWN' && angle > SIDE_PUSHUP_UP_THRESHOLD) this.state = 'UP';
+    if (this.state === 'UP' && angle < downAt) this.state = 'DOWN';
+    if (this.state === 'DOWN' && angle > upAt) this.state = 'UP';
     if (prevState === 'DOWN' && this.state === 'UP') {
       this.count++;
       this._lastCountT = nowSec();

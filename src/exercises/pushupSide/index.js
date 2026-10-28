@@ -7,24 +7,22 @@ import { VoiceManager } from '../../core/voiceManager.js';
 import { primeSetIntro } from '../../core/sessionVoice.js';
 import { createScoreAverager } from '../../core/repScoring';
 import { RepeatMistakeGate } from '../common/repeatMistakeGate.js';
-import { SIDE_PUSHUP_CFG, SIDE_PUSHUP_FEEDBACK, FORM_COLORS, SIDE_PUSHUP_UP_THRESHOLD } from './config';
+import { SIDE_PUSHUP_CFG, SIDE_PUSHUP_FEEDBACK, FORM_COLORS } from './config';
 import { scoreSidePushUpRep } from './repScore';
+import { drawSidePushUpGuides } from './draw';
 import {
   SidePushUpRepTracker,
-  sidePushupLandmarksVisible,
+  sidePushupArmLandmarksVisible,
   sidePushupPostureLandmarksVisible,
   evaluateSidePushUpPosture,
-  detectVisibleSide,
-  getHipLineMetrics,
-  getTooDeepLineY,
-  getSideLm,
 } from './SidePushUpRepTracker';
 
 const VOICE_CD_MS = 10_000;
+const DO_REP_ONE_MSG = 'Do rep one.';
 
 const VOICE_MSG = {
-  no_profile: 'Turn sideways so your full profile is visible.',
-  ready: 'Upper body detected. Begin your push-up.',
+  no_person: 'No person detected.',
+  start_exercise: 'Start the exercise.',
   done: 'Congratulations. You finished every rep.',
 };
 
@@ -70,6 +68,10 @@ function createSidePushUpTracker(options = {}) {
   let doneVoiceSent = false;
   let lastLiveCueKey = '';
 
+  if (Number(options.targetReps) > 0) {
+    SIDE_PUSHUP_CFG.pushup_max_reps = Number(options.targetReps);
+  }
+
   const speak = (text, opts) => {
     if (!voiceEnabled) return false;
     return voice.speak(text, opts);
@@ -102,25 +104,34 @@ function createSidePushUpTracker(options = {}) {
       voice.resetCooldowns();
     },
 
+    setTargetReps(n) {
+      SIDE_PUSHUP_CFG.pushup_max_reps = Number(n) > 0 ? Number(n) : 0;
+    },
+
     update(landmarks) {
-      if (!landmarks || !sidePushupLandmarksVisible(landmarks)) {
-        speak(VOICE_MSG.no_profile, { key: 'side_pu_no_profile', cooldownMs: VOICE_CD_MS });
+      // No stance / side-pose gate — arms visible → count + mistakes immediately.
+      if (!landmarks || !sidePushupArmLandmarksVisible(landmarks)) {
+        speak(VOICE_MSG.no_person, { key: 'side_pu_no_person', cooldownMs: VOICE_CD_MS });
         return {
           repCount: rep.count,
           phase: 'idle',
           progress: 0,
           formScore: scores.value,
           ready: false,
-          cues: [{ level: 'info', text: 'Turn sideways so your full profile is visible' }],
+          cues: [{ level: 'info', text: 'Get into push-up position' }],
           feedback: null,
           repEvent: null,
           skeletonColor: FORM_COLORS.green,
+          elbowAngle: 0,
+          pushupState: rep.state,
+          visibleSide: rep.visibleSide,
         };
       }
 
       if (!readyVoiceSent) {
         readyVoiceSent = true;
-        speak(VOICE_MSG.ready, { key: 'side_pu_ready', cooldownMs: 0, immediate: true });
+        speak(VOICE_MSG.start_exercise, { key: 'side_pu_start', cooldownMs: 0, immediate: true });
+        speakQueued(DO_REP_ONE_MSG, { key: 'side_pu_do_rep_one' });
       }
 
       const elbowAngle = rep.updateAngle(landmarks);
@@ -133,7 +144,7 @@ function createSidePushUpTracker(options = {}) {
         downStartT = nowSec();
         mistakeGate.startRep();
       }
-      if (cycleStartT < 0 && elbowAngle < SIDE_PUSHUP_UP_THRESHOLD) cycleStartT = nowSec();
+      if (cycleStartT < 0 && elbowAngle < SIDE_PUSHUP_CFG.up_threshold) cycleStartT = nowSec();
       if (cycleStartT >= 0) cycleMinAngle = Math.min(cycleMinAngle, elbowAngle);
 
       let posture = null;
@@ -212,11 +223,12 @@ function createSidePushUpTracker(options = {}) {
         hipDevN = 0;
       }
 
+      // On-screen coach always shows the live form cue; voice stays behind
+      // RepeatMistakeGate (repeat-only) so it does not nag every frame.
       const cues = [];
-      const primaryShown = posture && mistakeGate.allows(posture.cueKeys[0]);
-      if (primaryShown && posture.primaryColorKey === 'red') {
+      if (posture && posture.primaryColorKey === 'red' && posture.primaryMessage) {
         cues.push({ level: 'bad', text: posture.primaryMessage });
-      } else if (primaryShown && posture.primaryColorKey === 'yellow') {
+      } else if (posture && posture.primaryColorKey === 'yellow' && posture.primaryMessage) {
         cues.push({ level: 'warn', text: posture.primaryMessage });
       } else if (rep.state === 'DOWN') {
         cues.push({ level: 'ok', text: 'Lower with control — keep your back straight' });
@@ -237,40 +249,17 @@ function createSidePushUpTracker(options = {}) {
         repEvent,
         skeletonColor,
         elbowAngle: +elbowAngle.toFixed(1),
+        pushupState: rep.state,
+        visibleSide,
       };
     },
 
-    draw(ctx, landmarks, frame) {
-      if (!landmarks) return;
-      const w = frame.width;
-      const h = frame.height;
-      const side = detectVisibleSide(landmarks);
-      const sh = getSideLm(landmarks, side, 'shoulder');
-      const { hip, foot } = getHipLineMetrics(landmarks, side);
-      ctx.save();
-      // Back reference line: shoulder → hip → foot
-      ctx.strokeStyle = 'rgba(120,200,255,0.9)';
-      ctx.lineWidth = 2;
-      ctx.beginPath();
-      ctx.moveTo(sh.x * w, sh.y * h);
-      ctx.lineTo(hip.x * w, hip.y * h);
-      ctx.lineTo(foot.x * w, foot.y * h);
-      ctx.stroke();
-      // Too-deep line at shoulder level
-      if (rep.state === 'DOWN') {
-        const lineY = getTooDeepLineY(landmarks, side) * h;
-        ctx.strokeStyle = 'rgb(0,60,200)';
-        ctx.setLineDash([8, 6]);
-        ctx.beginPath();
-        ctx.moveTo(0, lineY);
-        ctx.lineTo(w, lineY);
-        ctx.stroke();
-        ctx.setLineDash([]);
-        ctx.fillStyle = 'rgb(120,200,255)';
-        ctx.font = '11px sans-serif';
-        ctx.fillText('Too-deep line', 12, lineY - 6);
-      }
-      ctx.restore();
+    draw(ctx, landmarks, frame, state) {
+      drawSidePushUpGuides(ctx, landmarks, frame, {
+        state: state?.pushupState || rep.state,
+        elbowAngle: state?.elbowAngle ?? rep.smoothAngle,
+        visibleSide: state?.visibleSide || rep.visibleSide,
+      });
     },
   };
 }
