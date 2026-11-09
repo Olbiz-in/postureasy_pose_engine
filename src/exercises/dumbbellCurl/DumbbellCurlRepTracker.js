@@ -9,10 +9,11 @@
 //               ('bottom'), when a new curl starts before that ('reversal' =
 //               not lowering fully), or when the arm stays hidden ('lost').
 //
-// curl_mode 'both': the two arm cycles are paired into one attempt, counted
-// only when BOTH arms reached the top and returned to the bottom within
-// `pair_window_sec` of each other; otherwise it is INCOMPLETE.
-// curl_mode 'alternate': every arm cycle is its own attempt.
+// curl_mode 'both': the two arm cycles are paired into one attempt. A rep is
+// COMMITTED as soon as BOTH arms reach `min_count_rom` (default 70%) on the
+// way up — count + voice fire then. Lowering finishes form scoring. Full top
+// + lower = clean-eligible. Incomplete / below threshold = not counted.
+// curl_mode 'alternate': every arm cycle is its own attempt (same commit rule).
 //
 // 'both' mode also checks that the arms move together: while a rep is in
 // progress the left / right curl progress gap must stay within
@@ -57,6 +58,7 @@ function newCycle(side, now, progress) {
     body: newBody(),
     partial: false,
     consumed: false,
+    committed: false,
   };
 }
 
@@ -89,6 +91,7 @@ export class DumbbellCurlRepTracker {
     this._base = null;
     this._lastPeak = { left: null, right: null };
     this._lastNow = -1;
+    this._openCommit = null; // { index, repInSet, side, mode } while a committed curl is still open
     this._lockMode();
     this.live = { left: 'WAIT_DOWN', right: 'WAIT_DOWN', progress: { left: null, right: null }, liveKeys: [] };
   }
@@ -127,6 +130,8 @@ export class DumbbellCurlRepTracker {
     this._pending = null;
     this._base = null;
     this._restHist = [];
+    // Count already committed stays; just clear the open curl handle.
+    this._openCommit = null;
   }
 
   /**
@@ -136,6 +141,23 @@ export class DumbbellCurlRepTracker {
    */
   finalize(calib, now) {
     const out = [];
+    // Mid-curl commit still open — close the live cycles so the attempt is stored.
+    if (this._openCommit) {
+      const cycles = [];
+      for (const side of SIDES) {
+        const arm = this._arms[side];
+        if (arm.state === 'UP' && arm.cycle && !arm.cycle.consumed) {
+          arm.cycle.closedBy = arm.cycle.closedBy || 'lost';
+          arm.cycle.endAt = now;
+          arm.cycle.consumed = true;
+          cycles.push(arm.cycle);
+        }
+      }
+      if (cycles.length) {
+        const a = this._resolve(cycles, calib, this.mode);
+        if (a) out.push(a);
+      }
+    }
     if (this._pending) {
       this._attachPartnerAsPartial(now);
       const a = this._resolvePending(calib);
@@ -269,7 +291,8 @@ export class DumbbellCurlRepTracker {
   /**
    * Advance one frame.
    * @returns {{ attempts: object[], topSides: string[], liveKeys: string[],
-   *             progress: {left:number|null, right:number|null} }}
+   *             progress: {left:number|null, right:number|null},
+   *             commit: object|null }}
    */
   update(g, calib, now) {
     const dt = this._lastNow < 0 ? 0 : Math.min(0.2, Math.max(0, now - this._lastNow));
@@ -311,6 +334,9 @@ export class DumbbellCurlRepTracker {
       }
     }
 
+    // Confirm countable ROM (≥ min_count_rom) → bump the counter immediately.
+    const commit = this._tryCommit(progress);
+
     const attempts = [];
     for (const c of done) {
       const a = this._onCycleDone(c, calib, now);
@@ -333,7 +359,55 @@ export class DumbbellCurlRepTracker {
       progress,
       liveKeys: [...liveKeys],
     };
-    return { attempts, topSides, liveKeys: [...liveKeys], progress };
+    return { attempts, topSides, liveKeys: [...liveKeys], progress, commit };
+  }
+
+  /**
+   * Once peak progress clears `min_count_rom`, this curl is a counted rep.
+   * Increments the counter immediately (voice/display sync) and marks the
+   * open cycle(s) so the bottom resolve does not count again.
+   */
+  _tryCommit(progress) {
+    if (this._openCommit) return null;
+    const need = DC_CFG.min_count_rom;
+
+    if (this.mode === 'both') {
+      const l = progress.left;
+      const r = progress.right;
+      if (l == null || r == null) return null;
+      if (this._arms.left.state !== 'UP' || this._arms.right.state !== 'UP') return null;
+      if (Math.min(l, r) < need) return null;
+      this._arms.left.cycle.committed = true;
+      this._arms.right.cycle.committed = true;
+      return this._commitOpen('both');
+    }
+
+    for (const side of SIDES) {
+      const c = this._arms[side].cycle;
+      const p = progress[side];
+      if (!c || c.committed || p == null || p < need) continue;
+      c.committed = true;
+      return this._commitOpen(side);
+    }
+    return null;
+  }
+
+  _commitOpen(side) {
+    this.count += 1;
+    this.setCount += 1;
+    this._openCommit = {
+      index: this.count,
+      repInSet: this.setCount,
+      set: this.setIndex,
+      side,
+      mode: this.mode,
+    };
+    return {
+      ...this._openCommit,
+      counted: true,
+      commit: true,
+      spoken: false,
+    };
   }
 
   // ── Attempts ──────────────────────────────────────────────────────────────
@@ -376,6 +450,7 @@ export class DumbbellCurlRepTracker {
     const liftScore = 1 - ramp(c.maxElbowLift, DC_CFG.elbow_lift_tolerance, DC_CFG.elbow_lift_zero_at);
     const flareScore = 1 - ramp(c.maxElbowFlare, DC_CFG.elbow_flare_tolerance, DC_CFG.elbow_flare_zero_at);
     const lost = c.closedBy === 'lost';
+    const peakOk = c.peak >= DC_CFG.min_count_rom;
     return {
       side: c.side,
       reachedTop: c.reachedTop && !lost,
@@ -383,7 +458,9 @@ export class DumbbellCurlRepTracker {
       lost,
       partial: !!c.partial,
       notLowered: c.closedBy === 'reversal',
-      full: c.reachedTop && lowered && !c.partial,
+      // Full ROM: hit the top line and lowered. Countable: lowered with ≥ min_count_rom.
+      full: c.reachedTop && lowered && !c.partial && !lost,
+      counts: lowered && !lost && !c.partial && peakOk,
       peak: round2(c.peak),
       romPct: Math.round(clamp01(c.peak) * 100),
       extensionPct: Math.round(ext * 100),
@@ -429,12 +506,17 @@ export class DumbbellCurlRepTracker {
     const arms = cycles.map((c) => this._armResult(c, calib));
     const L = arms.find((a) => a.side === 'left') || null;
     const R = arms.find((a) => a.side === 'right') || null;
-    const counted = both ? !!(L && R && L.full && R.full) : arms[0].full;
+    const preCommitted = !!(this._openCommit && cycles.some((c) => c.committed));
+    const bottomCounts = both ? !!(L && R && L.counts && R.counts) : !!arms[0].counts;
+    // Prefer the mid-curl commit; otherwise fall back to classic bottom count.
+    const counted = preCommitted || bottomCounts;
+    const fullRom = both ? !!(L && R && L.full && R.full) : !!arms[0].full;
+    const open = preCommitted ? this._openCommit : null;
 
     const issues = new Set();
     if (!counted) {
       const incomplete = both
-        ? arms.length < 2 || arms.some((a) => a.lost || a.partial) || (arms.some((a) => a.full) && !arms.every((a) => a.full))
+        ? arms.length < 2 || arms.some((a) => a.lost || a.partial) || (arms.some((a) => a.counts) && !arms.every((a) => a.counts))
         : arms.some((a) => a.lost);
       if (incomplete) issues.add('dc_incomplete');
     }
@@ -477,28 +559,36 @@ export class DumbbellCurlRepTracker {
 
     const keys = DC_ISSUE_PRIORITY.filter((k) => issues.has(k));
     const clean = counted
+      && fullRom
       && score >= DC_CFG.clean_score_min
       && !issues.has('dc_too_high')
       && !issues.has('dc_incomplete')
       && !issues.has('dc_not_lowering')
+      && !issues.has('dc_not_high_enough')
       && !issues.has('dc_arms_uneven');
 
-    if (counted) {
+    if (counted && !preCommitted) {
       this.count += 1;
       this.setCount += 1;
     }
+    const index = counted ? (open?.index ?? this.count) : null;
+    const repInSet = counted ? (open?.repInSet ?? this.setCount) : null;
+    this._openCommit = null;
     for (const a of arms) if (!a.lost && !a.partial) this._lastPeak[a.side] = a.peak;
 
     const startAt = Math.min(...arms.map((a) => a.startAt));
     const endAt = Math.max(...arms.map((a) => a.endAt));
     const result = {
       attempt: this.attempts.length + 1,
-      index: counted ? this.count : null,
+      index,
       set: this.setIndex,
-      repInSet: counted ? this.setCount : null,
+      repInSet,
       mode,
       side: both ? 'both' : arms[0].side,
       counted,
+      // True when the counter already ticked mid-curl — Flow must not re-speak.
+      alreadyAnnounced: preCommitted,
+      fullRom,
       clean,
       score,
       components: {

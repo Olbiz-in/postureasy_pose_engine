@@ -50,18 +50,25 @@ function toTrackerState(flow, fr) {
     sessionSec: summary.sessionSec,
     restRemainingSec: fr.restRemainingSec,
     ready: fr.phase !== DC_PHASE.SETUP_STANCE,
-    posture: fr.sustainedCues?.length ? 'incorrect' : 'correct',
+    posture: (fr.shownCues || fr.sustainedCues)?.length ? 'incorrect' : 'correct',
     cues,
     feedback: fr.feedback || null,
     skeletonColor: fr.boneColor,
-    postureResult: { cueKeys: fr.sustainedCues || [] },
+    // Screenshots / gallery: only 2nd-consecutive gated cues (never first hit).
+    mistakeCues: fr.shownCues || [],
+    postureResult: { cueKeys: fr.shownCues || [] },
+    armGap: fr.armGap,
+    armSyncTolerance: fr.armSyncTolerance,
     stanceData: setupPhase && fr.stanceResult ? { allCues: fr.stanceResult.cueKeys || [] } : null,
     lastRep: fr.lastAttempt,
   };
 }
 
 function toRepEvent(done) {
-  const errorKey = done.primaryIssue;
+  // Prefer gated shownIssue / errors so first-time uneven does not snapshot.
+  const gated = Array.isArray(done.errors) ? done.errors : null;
+  const errorKey = done.shownIssue || done.primaryIssue || gated?.[0] || null;
+  const errors = gated || (errorKey ? [errorKey] : []);
   return {
     index: done.index,
     set: done.set,
@@ -70,7 +77,7 @@ function toRepEvent(done) {
     durationSec: done.durationSec,
     errorKey,
     error: errorKey ? DC_FEEDBACK[errorKey] || null : null,
-    errors: done.issues,
+    errors,
     good: done.clean,
     metric: done.score,
     score: done.score,

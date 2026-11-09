@@ -57,14 +57,26 @@ function geometry(pL, pR) {
   };
 }
 
+/** Curl progress peaking at `peak` (0–1), then lowering. */
+function curlTo(peak) {
+  return (t) => {
+    if (t <= 0) return 0;
+    if (t < 1) return peak * t;
+    if (t < 1.4) return peak;
+    if (t < 2.4) return peak * (2.4 - t);
+    return 0;
+  };
+}
+
 /** One both-arms rep; the right arm starts `lag` seconds after the left. */
-function runRep(tr, t0, { lag = 0 } = {}) {
+function runRep(tr, t0, { lag = 0, peak = 1 } = {}) {
   const live = new Set();
   const attempts = [];
   const end = 2.4 + lag + 1.5;
+  const path = curlTo(peak);
   for (let i = 0; i <= end * FPS; i += 1) {
     const t = i / FPS;
-    const r = tr.update(geometry(curl(t), curl(t - lag)), CALIB, t0 + t);
+    const r = tr.update(geometry(path(t), path(t - lag)), CALIB, t0 + t);
     r.liveKeys.forEach((k) => live.add(k));
     attempts.push(...r.attempts);
   }
@@ -133,5 +145,22 @@ describe('dumbbell curl arm symmetry', () => {
     const s = summarizeDumbbellCurl(tr.attempts);
     assert.equal(s.mistakes.armsUneven, 1);
     assert.equal(s.cleanReps, 1);
+  });
+
+  test('partial ROM ≥ 70% still counts (flagged not high enough, not clean)', () => {
+    const tr = new DumbbellCurlRepTracker();
+    const { attempt } = runRep(tr, settle(tr, 0), { peak: 0.75 });
+    assert.ok(attempt?.counted);
+    assert.equal(attempt.fullRom, false);
+    assert.equal(attempt.clean, false);
+    assert.ok(attempt.issues.includes('dc_not_high_enough'));
+  });
+
+  test('partial ROM below 70% is not counted', () => {
+    const tr = new DumbbellCurlRepTracker();
+    const { attempt } = runRep(tr, settle(tr, 0), { peak: 0.55 });
+    assert.ok(attempt);
+    assert.equal(attempt.counted, false);
+    assert.ok(attempt.issues.includes('dc_not_high_enough'));
   });
 });

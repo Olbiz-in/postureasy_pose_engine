@@ -250,6 +250,7 @@ export const DUMBBELL_CURL_TOLERANCE_GROUPS = [
       { key: 'upper_allowance', label: 'Upper limit above shoulder (× shoulder width)', min: 0, max: 0.4, step: 0.005 },
       { key: 'bottom_tolerance', label: 'Fully lowered within (× torso)', min: 0.03, max: 0.3, step: 0.005 },
       { key: 'curl_start', label: 'Rep start (curl progress)', min: 0.15, max: 0.6, step: 0.01 },
+      { key: 'min_count_rom', label: 'Count + say Rep from (ROM fraction on the way up)', min: 0.4, max: 1.0, step: 0.01 },
       { key: 'pair_window_sec', label: 'Both-arm window (s)', min: 0.2, max: 2.0, step: 0.05 },
     ],
   },

@@ -68,6 +68,10 @@ export const DC_CFG_DEFAULTS = {
   bottom_tolerance: 0.10, // × T: wrist within this of the resting level = fully extended
   curl_start: 0.25, // progress: the arm has left the bottom zone (rep begins)
   attempt_min_progress: 0.40, // cycles lower than this are ignored as noise
+  // Peak curl progress that confirms a countable rep (partial ROM included).
+  // Crossing this on the way up commits the count + "Rep N" voice immediately;
+  // lowering finishes scoring. 1 = only full-top reps count.
+  min_count_rom: 0.70,
   // "Not lowering fully": after dropping this much from the peak (progress)…
   reversal_drop: 0.25,
   // …the wrist rises again this much before reaching the bottom zone.
@@ -221,11 +225,12 @@ export const DC_FEEDBACK = {
   dc_long_idle: 'Paused — start your next rep or press Stop',
 };
 
-// Spoken lines — only stance OK / start, rep counts, set complete, rest
-// prompts and the final summary (spoken by the app on Stop / completion).
+// Spoken lines — stance / reps / set flow, plus gated form cues (uneven arms
+// only after two consecutive reps via RepeatMistakeGate).
 export const DC_VOICE_MSG = {
   dc_stance_ok: 'Your stance is correct. Start the exercise.',
   rep: (n) => `Rep ${n}`,
+  dc_arms_uneven: 'Uneven arm movement. Curl both arms together.',
   set_done: (n) => `Set ${n} complete. Take a rest.`,
   rest_over: (next) => `Rest is over. Stand in your stance with your arms down to start set ${next}.`,
   next_set: (set, total) => (total > 0 ? `Set ${set} of ${total}. Start.` : `Set ${set}. Start.`),

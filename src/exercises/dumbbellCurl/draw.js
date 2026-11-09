@@ -124,7 +124,12 @@ export function drawProgressBars(ctx, fr, w, h, mirrored) {
   // On a mirrored (selfie) view the user's left arm appears on screen-left.
   const screenLeftSide = mirrored ? 'left' : 'right';
   const ap = fr.armProgress || {};
-  const lagging = (fr.sustainedCues || []).includes('dc_arms_uneven') && ap.left != null && ap.right != null
+  const gap = (ap.left != null && ap.right != null)
+    ? Math.abs(ap.left - ap.right)
+    : (fr.armGap ?? null);
+  const tol = fr.armSyncTolerance ?? DC_CFG.arm_sync_tolerance;
+  const unevenNow = gap != null && gap > tol;
+  const lagging = unevenNow
     ? (ap.left < ap.right ? 'left' : 'right')
     : null;
   for (const side of ['left', 'right']) {
@@ -143,6 +148,23 @@ export function drawProgressBars(ctx, fr, w, h, mirrored) {
       ctx, p == null ? '—' : `${Math.round(p * 100)}%`, sx + bw / 2, top + bh + size + 6, w, mirrored,
       p == null ? GREY : WHITE, { size: size - 1, weight: 700, align: 'center' },
     );
+  }
+
+  // Sync tolerance readout — always visible while both arms are tracked.
+  if (gap != null) {
+    const gapPct = Math.round(gap * 100);
+    const tolPct = Math.round(tol * 100);
+    const label = unevenNow
+      ? `Uneven ${gapPct}%  (max ${tolPct}%)`
+      : `Sync OK  gap ${gapPct}% / ${tolPct}%`;
+    const color = unevenNow ? RED : GREEN;
+    const tw = Math.min(w - 24, Math.max(160, Math.round(w * 0.42)));
+    const tx = Math.round((w - tw) / 2);
+    const ty = top + bh + size * 2 + 14;
+    screenBox(ctx, tx, ty, tw, size + 14, w, mirrored, PANEL);
+    screenText(ctx, label, w / 2, ty + size + 2, w, mirrored, color, {
+      size: size - 1, weight: 700, align: 'center',
+    });
   }
 }
 

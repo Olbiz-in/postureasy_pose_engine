@@ -54,6 +54,9 @@ export class VoiceManager {
     // instead of cancelling it.
     this._prime = null;
     this._primedUtterance = false;
+    // Soft / low-priority line (rep counts). At most one pending; never blocks
+    // mistakes. Dropped if still busy when it would play, or replaced by a newer soft.
+    this._soft = null;
     // Bumped on every utterance / cancel so a cancelled utterance's late onEnd
     // cannot release the lock held by the utterance that replaced it.
     this._token = 0;
@@ -78,11 +81,26 @@ export class VoiceManager {
       return text;
     }
     this._primedUtterance = false;
-    return this._queue.shift();
+    if (this._queue.length) return this._queue.shift();
+    // Soft only when the hard queue is empty (mistakes / coaching first).
+    if (this._soft) {
+      const text = this._soft;
+      this._soft = null;
+      return text;
+    }
+    return null;
   }
 
   _introPending() {
     return this._prime != null || this._primedUtterance;
+  }
+
+  _hardBusy() {
+    return this._introPending()
+      || this._isDirectSpeaking
+      || this._isQueuedSpeaking
+      || this._queue.length > 0
+      || !!this._adapter?.isSpeaking?.();
   }
 
   _playNextQueued() {
@@ -97,6 +115,7 @@ export class VoiceManager {
     if (!started) {
       this._isQueuedSpeaking = false;
       this._primedUtterance = false;
+      this._playNextQueued();
     }
   }
 
@@ -110,6 +129,8 @@ export class VoiceManager {
 
     if (immediate) {
       this._queue = [];
+      // Mistakes win: drop any pending soft rep-count.
+      this._soft = null;
       if (this._introPending()) {
         this._queue.push(text);
         this._playNextQueued();
@@ -126,7 +147,7 @@ export class VoiceManager {
     }
 
     // Serialize behind any in-flight or queued speech, including the set intro.
-    if (this._introPending() || this._isDirectSpeaking || this._isQueuedSpeaking || this._adapter.isSpeaking() || this._queue.length > 0) {
+    if (this._hardBusy()) {
       this._queue.push(text);
       this._playNextQueued();
       return true;
@@ -136,6 +157,20 @@ export class VoiceManager {
     const started = this._adapter.speak(text, { onEnd: this._ender('_isDirectSpeaking') });
     if (!started) this._isDirectSpeaking = false;
     return started;
+  }
+
+  /**
+   * Low-priority speak (rep counts). Speaks now only if the channel is free;
+   * otherwise keeps at most the latest soft line and plays it when free —
+   * never ahead of mistakes. A newer soft call replaces the pending one.
+   */
+  speakSoft(text, { key } = {}) {
+    if (!this._adapter?.isAvailable?.() || !text) return false;
+    if (key !== undefined) this._cooldowns[key] = Date.now();
+    this._soft = text;
+    if (this._hardBusy()) return true;
+    this._playNextQueued();
+    return true;
   }
 
   speakQueued(text, { key, cooldownMs = 0 } = {}) {
@@ -166,6 +201,7 @@ export class VoiceManager {
   cancel() {
     if (!this._adapter?.isAvailable?.()) return;
     this._queue = [];
+    this._soft = null;
     this._prime = null;
     this._primedUtterance = false;
     this._isQueuedSpeaking = false;

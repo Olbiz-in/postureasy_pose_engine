@@ -105,12 +105,53 @@ export class DumbbellCurlFlow {
     this._final = null;
     this._frameNo = 0;
     this._debugHeaderSent = false;
+    // Rep number spoken at mid-curl commit (≥ min_count_rom); skip re-speak at bottom.
+    this._spokenCommitRep = null;
+    this._spokenUnevenForRep = null;
+  }
+
+  /**
+   * Count already ticked at ≥70% up — speak once now so voice + display match.
+   * Form scoring / set-complete still wait until the arms finish lowering.
+   */
+  _onRepCommit(c, now) {
+    if (!c?.counted || this._spokenCommitRep === c.repInSet) return;
+    this._spokenCommitRep = c.repInSet;
+    const setPart = this._targetSets > 0 ? `Set ${this._currentSet} of ${this._targetSets}, ` : '';
+    const repPart = this._targetReps > 0 ? `Rep ${c.repInSet} of ${this._targetReps}` : `Rep ${c.repInSet}`;
+    this._setBanner(`${setPart}${repPart}`, now, 2.0);
+    // Soft: mistakes win; only plays when free; newer rep replaces a pending one.
+    this._speakRepSoft(c.repInSet);
   }
 
   // ── Voice / text helpers ─────────────────────────────────────────────────
+  _speak(text, opts) {
+    if (!this._voiceEnabled || !text) return false;
+    return this._voice.speak(text, opts);
+  }
+
   _speakQueued(text, opts) {
     if (!this._voiceEnabled || !text) return false;
     return this._voice.speakQueued(text, opts);
+  }
+
+  _speakRepSoft(n) {
+    if (!this._voiceEnabled || n == null) return false;
+    return this._voice.speakSoft(DC_VOICE_MSG.rep(n), { key: `dc_rep_soft_${this._currentSet}_${n}` });
+  }
+
+  /** Gated form cue — currently only uneven arms is voiced (after 2 consecutive). */
+  _speakGatedMistake(key) {
+    if (!key || key !== 'dc_arms_uneven') return false;
+    const n = this._rep.setCount;
+    if (this._spokenUnevenForRep === n) return false;
+    this._spokenUnevenForRep = n;
+    const text = DC_VOICE_MSG.dc_arms_uneven || this._issueText(key);
+    return this._speak(text, {
+      key: `dc_mistake_${key}_${this._currentSet}_${n}`,
+      cooldownMs: 0,
+      immediate: true,
+    });
   }
 
   _voiceBusy() {
@@ -280,6 +321,9 @@ export class DumbbellCurlFlow {
       armProgress: this._calib ? this._armProgress(g) : { left: null, right: null },
       stanceResult: null,
       sustainedCues: [],
+      shownCues: [],
+      armGap: null,
+      armSyncTolerance: DC_CFG.arm_sync_tolerance,
       restRemainingSec: null,
       lastAttempt: rep.lastAttempt,
       repsCompleted: [],
@@ -417,7 +461,10 @@ export class DumbbellCurlFlow {
     const rep = this._rep;
 
     if (!g) {
-      if (lostLong) rep.abortInProgress();
+      if (lostLong) {
+        rep.abortInProgress();
+        this._spokenCommitRep = null;
+      }
       this._setActivity(false, 'dc_out_of_frame', now);
       return this._result(g, now, {
         status: DC_FEEDBACK.dc_out_of_frame, statusKind: 'warn',
@@ -428,6 +475,7 @@ export class DumbbellCurlFlow {
 
     if (facingRatio(g, this._calib) < DC_CFG.turn_ratio) {
       rep.abortInProgress();
+      this._spokenCommitRep = null;
       this._setActivity(false, 'dc_turned_away', now);
       return this._result(g, now, {
         status: DC_FEEDBACK.dc_turned_away, statusKind: 'warn',
@@ -443,24 +491,29 @@ export class DumbbellCurlFlow {
     this._setActivity(exercising, exercising ? 'dc_rep_in_progress' : 'dc_arms_resting', now);
     if (exercising) this._activeSec += dt;
 
+    // ≥ min_count_rom on the way up → count ticks + "Rep N" once (no duplicates).
+    if (res.commit) this._onRepCommit(res.commit, now);
+
     const sustained = this._sustained(rep.inProgress ? res.liveKeys : [], now);
+    // Only 2nd-consecutive mistakes are shown / voiced / screenshot-eligible.
     const shownLive = this._mistakeGate.filter(sustained);
     const primaryLive = shownLive.length ? firstByPriority(shownLive, DC_LIVE_PRIORITY) : null;
     if (primaryLive) {
       this._setFeedback(DC_FEEDBACK[primaryLive], now, 1.0);
       this._setMistake(primaryLive, now, LIVE_MISTAKE_HOLD_SEC);
+      this._speakGatedMistake(primaryLive);
     } else if (res.topSides.length && !this._currentFeedback(now)) {
       this._setFeedback('Top reached — lower slowly all the way down', now, 1.0);
     }
 
     const repsCompleted = [];
     for (const attempt of res.attempts) {
-      if (attempt.counted) repsCompleted.push(attempt);
-      const setDone = this._onAttempt(attempt, now);
+      const setDone = this._onAttempt(attempt, now, repsCompleted);
       if (setDone) return this._onSetComplete(g, now, res.attempts, repsCompleted);
     }
 
     let boneColor = DC_COLOR_GREEN;
+    // Raw uneven still tints the skeleton so the sync gap is obvious on video.
     if (sustained.length) boneColor = DC_COLOR_RED;
     else if (!exercising) boneColor = DC_COLOR_GREY;
 
@@ -470,22 +523,31 @@ export class DumbbellCurlFlow {
     else if (res.topSides.length) status = 'Squeeze at the top…';
     else status = 'Curl up to the target line…';
 
+    const armGap = (res.progress?.left != null && res.progress?.right != null)
+      ? Math.abs(res.progress.left - res.progress.right)
+      : null;
+
     return this._result(g, now, {
       status,
       statusKind: shownLive.length ? 'warn' : 'ok',
       boneColor,
       activity: this._activity,
       activityReason: this._activityReason,
+      // Raw detection (scoring / bar tint). Screenshots use shownCues only.
       sustainedCues: sustained,
+      shownCues: shownLive,
+      armGap,
+      armSyncTolerance: DC_CFG.arm_sync_tolerance,
       repsCompleted,
       attemptsCompleted: res.attempts,
     });
   }
 
   /** @returns {boolean} true when this attempt finished the current set. */
-  _onAttempt(a, now) {
+  _onAttempt(a, now, repsCompleted) {
     const rep = this._rep;
     const repIssues = a.issues.length ? a.issues : (a.counted ? [] : ['dc_incomplete']);
+    // Gate: first uneven is noted only; 2nd consecutive → show / voice / screenshot.
     const issue = this._mistakeGate.endRep(repIssues)[0] || null;
     const setDone = this._targetReps > 0 && rep.setCount >= this._targetReps;
 
@@ -495,13 +557,38 @@ export class DumbbellCurlFlow {
       this._setBanner(`${setPart}${repPart}${a.clean ? ' ✓' : ''}`, now, 2.0);
       if (issue) this._setFeedback(this._issueText(issue), now);
       else if (!repIssues.length) this._setFeedback('Good rep!', now);
-      this._speakQueued(DC_VOICE_MSG.rep(a.repInSet), { key: `dc_rep_${this._currentSet}_${a.repInSet}_${a.attempt}` });
+      // Soft rep already tried at commit — don't hard-speak again at the bottom.
+      if (a.alreadyAnnounced || this._spokenCommitRep === a.repInSet) {
+        this._spokenCommitRep = null;
+      } else {
+        this._spokenCommitRep = null;
+        this._speakRepSoft(a.repInSet);
+      }
+      // Screenshot pipeline only sees gated issues (empty on the first occurrence).
+      repsCompleted.push({
+        ...a,
+        primaryIssue: issue,
+        errors: issue ? [issue] : [],
+        shownIssue: issue,
+      });
     } else {
       this._setBanner('Rep not counted', now, 2.0);
       if (issue) this._setFeedback(this._issueText(issue), now);
+      this._spokenCommitRep = null;
+      if (issue) {
+        repsCompleted.push({
+          ...a,
+          primaryIssue: issue,
+          errors: [issue],
+          shownIssue: issue,
+        });
+      }
     }
 
-    if (issue) this._setMistake(issue, now, REP_MISTAKE_HOLD_SEC);
+    if (issue) {
+      this._setMistake(issue, now, REP_MISTAKE_HOLD_SEC);
+      this._speakGatedMistake(issue);
+    }
     return setDone;
   }
 
@@ -510,6 +597,7 @@ export class DumbbellCurlFlow {
     const finished = this._targetSets > 0 && this._setsCompleted >= this._targetSets;
     this._setActivity(false, finished ? 'dc_complete' : 'dc_resting_between_sets', now);
     this._rep.abortInProgress();
+    this._spokenCommitRep = null;
 
     if (finished) {
       this._phase = DC_PHASE.COMPLETE;

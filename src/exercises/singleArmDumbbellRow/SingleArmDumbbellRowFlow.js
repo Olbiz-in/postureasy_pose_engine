@@ -676,7 +676,11 @@ export class SingleArmDumbbellRowFlow {
       this._setBanner(`${setPart}${repPart}${a.clean ? ' ✓' : ''}`, now, 2.0);
       if (issue) this._setFeedback(SR_FEEDBACK[issue], now);
       else if (!a.issues.length) this._setFeedback('Good rep!', now);
-      this._speakQueued(SR_VOICE_MSG.rep(a.repInSet), { key: `sr_rep_${this._currentSet}_${a.repInSet}_${a.attempt}` });
+      this._speak(SR_VOICE_MSG.rep(a.repInSet), {
+        key: `sr_rep_${this._currentSet}_${a.repInSet}_${a.attempt}`,
+        cooldownMs: 0,
+        immediate: true,
+      });
     } else {
       this._setBanner('Rep not counted', now, 2.0);
       if (issue) this._setFeedback(SR_FEEDBACK[issue], now);
