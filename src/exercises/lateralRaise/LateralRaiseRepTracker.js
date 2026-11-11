@@ -8,13 +8,16 @@
 //               the shoulder line); the cycle ends once elbow AND wrist drop
 //               back under `lift_return`
 //
-// The two arm cycles are paired into one attempt, and every attempt is a
-// counted rep — partial range of motion included. A rep is "clean" only when
-// both elbows AND both wrists land inside the band: past the LOWER line (else
-// it is a half rep), never above the UPPER line (`elbow_above_tolerance`;
-// above it = overshoot, an injury risk). Every attempt gets a weighted 0–100 score.
+// Peak count fires when BOTH elbows reach `count_min_lift` (partial reps count).
+// A rep is "clean" / full stretch only when both elbows AND both wrists land
+// inside the shoulder band: past the LOWER line (else partial / half-rep),
+// never above the UPPER line (`elbow_above_tolerance`; overshoot = injury risk).
+// Every counted attempt gets a weighted 0–100 score.
 
-import { LR_CFG, LR_SCORE_WEIGHTS, LR_ISSUE_PRIORITY } from './config';
+import {
+  LR_CFG, LR_SCORE_WEIGHTS, LR_ISSUE_PRIORITY, LR_ISSUE_MEANING, LR_LIVE_VOICE,
+  issueSeverity, classifyIssues,
+} from './config';
 import { armLift, armLevelDiff } from './poseChecks';
 import { clamp01, ramp, round2, avg, firstByPriority } from '../common/math';
 
@@ -31,6 +34,8 @@ function newCycle(side, now) {
     endAt: -1,
     topAt: -1,
     reachedTop: false,
+    /** Sticky: elbow cleared the count-min lift (enough to COUNT). */
+    elbowCountOk: false,
     elbowTop: false,
     wristTop: false,
     peakLift: 0,
@@ -63,6 +68,9 @@ export class LateralRaiseRepTracker {
     this._pending = null;
     this._window = null;
     this._lastNow = -1;
+    this._peakHoldFrames = 0;
+    this._repLocked = false;
+    this._openRep = null; // counted at peak; finalized when arms return
     this.live = { left: null, right: null, liveKeys: [] };
   }
 
@@ -71,6 +79,11 @@ export class LateralRaiseRepTracker {
     this.setIndex = index;
     this.setCount = 0;
     this.abortInProgress();
+  }
+
+  /** True while a peak-counted rep is waiting to be finalized on the way down. */
+  get hasOpenRep() {
+    return !!this._openRep;
   }
 
   /** Any arm mid-cycle, or a finished arm waiting for its partner. */
@@ -88,6 +101,28 @@ export class LateralRaiseRepTracker {
     for (const s of SIDES) this._arms[s] = newArm();
     this._pending = null;
     this._window = null;
+    this._peakHoldFrames = 0;
+    this._repLocked = false;
+    // Open peak-counted rep is finalized by the flow via finalizeOpenRep().
+  }
+
+  /**
+   * If Stop arrives between peak and arms-down, finalize the open rep with
+   * whatever arm/window data we have so far.
+   */
+  finalizeOpenRep(calib, now) {
+    if (!this._openRep) return null;
+    if (!this._pending) this._pending = { left: null, right: null, firstAt: now };
+    for (const side of SIDES) {
+      const arm = this._arms[side];
+      if (!this._pending[side] && arm.cycle) {
+        this._pending[side] = { ...arm.cycle, endAt: now, partial: true };
+      }
+    }
+    for (const s of SIDES) this._arms[s] = newArm();
+    this._peakHoldFrames = 0;
+    this._repLocked = false;
+    return this._resolve(calib, now);
   }
 
   _openWindow(g, now) {
@@ -176,6 +211,8 @@ export class LateralRaiseRepTracker {
     c.peakLift = Math.max(c.peakLift, lift.elbow);
     c.minElbowDy = Math.min(c.minElbowDy, a.elbowDy);
     c.minWristDy = Math.min(c.minWristDy, a.wristDy);
+    // Count line (partial OK) vs full shoulder-band stretch.
+    if (lift.elbow >= LR_CFG.count_min_lift) c.elbowCountOk = true;
     if (a.elbowDy <= LR_CFG.top_tolerance) c.elbowTop = true;
     if (a.wristDy <= LR_CFG.top_tolerance) c.wristTop = true;
     if (!c.reachedTop && c.elbowTop && c.wristTop) {
@@ -208,8 +245,62 @@ export class LateralRaiseRepTracker {
   }
 
   /**
+   * Both arms are in UP and each elbow has cleared `count_min_lift` at least
+   * once this cycle (sticky). Partial raises still count; full stretch is
+   * scored later via the shoulder band.
+   */
+  _bothElbowsReachedCountMin() {
+    return SIDES.every((s) => {
+      const arm = this._arms[s];
+      return arm.state === 'UP' && arm.cycle && arm.cycle.elbowCountOk;
+    });
+  }
+
+  _bothArmsReset(g, calib) {
+    if (!g?.left?.ok || !g?.right?.ok) return false;
+    const resetLift = LR_LIVE_VOICE.RESET_THRESHOLD;
+    for (const side of SIDES) {
+      const lift = armLift(g[side], calib);
+      if (!lift || lift.elbow > resetLift) return false;
+    }
+    return true;
+  }
+
+  /** Count + lock when both elbows have held the count line for N frames. */
+  _tickPeakCount(g, calib, now) {
+    if (this._repLocked) {
+      if (this._bothArmsReset(g, calib)) {
+        this._repLocked = false;
+        this._peakHoldFrames = 0;
+      }
+      return null;
+    }
+    if (this._bothElbowsReachedCountMin()) {
+      this._peakHoldFrames += 1;
+      const need = Math.max(1, Math.round(LR_LIVE_VOICE.VALID_FRAMES));
+      if (this._peakHoldFrames >= need) {
+        this.count += 1;
+        this.setCount += 1;
+        this._openRep = {
+          index: this.count,
+          set: this.setIndex,
+          repInSet: this.setCount,
+          countedAt: now,
+        };
+        this._repLocked = true;
+        this._peakHoldFrames = 0;
+        this._openWindow(g, now);
+        return { ...this._openRep };
+      }
+      return null;
+    }
+    this._peakHoldFrames = 0;
+    return null;
+  }
+
+  /**
    * Advance one frame.
-   * @returns {{ attempt: object|null, topSides: string[], liveKeys: string[] }}
+   * @returns {{ attempt: object|null, peakCounted: object|null, topSides: string[], liveKeys: string[] }}
    */
   update(g, calib, now) {
     const dt = this._lastNow < 0 ? 0 : Math.min(0.2, Math.max(0, now - this._lastNow));
@@ -225,6 +316,8 @@ export class LateralRaiseRepTracker {
     }
     this._updateWindow(g, calib, now, dt).forEach((k) => liveKeys.add(k));
 
+    const peakCounted = this._tickPeakCount(g, calib, now);
+
     let attempt = null;
     const p = this._pending;
     if (p && p.left && p.right) {
@@ -238,14 +331,14 @@ export class LateralRaiseRepTracker {
       }
       attempt = this._resolve(calib, now);
     }
-    if (this._window && !this.inProgress) this._window = null;
+    if (this._window && !this.inProgress && !this._openRep) this._window = null;
 
     this.live = {
       left: this._arms.left.state,
       right: this._arms.right.state,
       liveKeys: [...liveKeys],
     };
-    return { attempt, topSides, liveKeys: [...liveKeys] };
+    return { attempt, peakCounted, topSides, liveKeys: [...liveKeys] };
   }
 
   _armResult(c, calib) {
@@ -337,23 +430,32 @@ export class LateralRaiseRepTracker {
     );
 
     const keys = LR_ISSUE_PRIORITY.filter((k) => issues.has(k));
-    const clean = fullRom
-      && score >= LR_CFG.clean_score_min
-      && !issues.has('lr_elbow_too_high')
-      && !issues.has('lr_wrist_too_high')
-      && !issues.has('lr_incomplete');
+    // clean = perfect (no mistakes). Binary accurate = no major. Continuous
+    // accuracyPct = weighted checks passed / total checks (skips lr_incomplete).
+    const { hasMajor, hasMinor, perfect, accurate, accuracyPct } = classifyIssues(keys);
 
-    this.count += 1;
-    this.setCount += 1;
+    // Peak path: count already happened. Partials that never peaked are dropped.
+    const open = this._openRep;
+    if (!open) {
+      this._pending = null;
+      this._window = null;
+      return null;
+    }
+    this._openRep = null;
     const startAt = win?.startAt ?? Math.min(...[p.left, p.right].filter(Boolean).map((c) => c.startAt));
     const result = {
       attempt: this.attempts.length + 1,
-      index: this.count,
-      set: this.setIndex,
-      repInSet: this.setCount,
+      index: open.index,
+      set: open.set,
+      repInSet: open.repInSet,
       counted: true,
+      countedAtPeak: true,
       fullRom,
-      clean,
+      clean: perfect,
+      accurate,
+      accuracyPct: Math.round(accuracyPct),
+      hasMajor,
+      hasMinor,
       score,
       components: {
         rom: Math.round(romScore),
@@ -380,6 +482,84 @@ export class LateralRaiseRepTracker {
   }
 }
 
+/** One-time glossary: mistake key → { meaning, severity } (put at top of JSON). */
+export function mistakeMeanings() {
+  const out = {};
+  for (const key of LR_ISSUE_PRIORITY) {
+    out[key] = {
+      meaning: LR_ISSUE_MEANING[key] || key,
+      severity: issueSeverity(key),
+    };
+  }
+  return out;
+}
+
+/** Per-rep checklist: only keys (meanings live once at session top). */
+export function mistakeChecklist(issues = []) {
+  const made = new Set(issues || []);
+  const mistakesMade = LR_ISSUE_PRIORITY.filter((k) => made.has(k));
+  const cls = classifyIssues(mistakesMade);
+  return {
+    mistakesMade,
+    mistakesNotMade: LR_ISSUE_PRIORITY.filter((k) => !made.has(k)),
+    hasMajor: cls.hasMajor,
+    hasMinor: cls.hasMinor,
+    accurate: cls.accurate,
+    accuracyPct: Math.round(cls.accuracyPct),
+  };
+}
+
+/** Compact JSON blob for one finished rep (console / debug). */
+export function buildRepMistakeReport(attempt) {
+  if (!attempt) return null;
+  const check = mistakeChecklist(attempt.issues);
+  return {
+    set: attempt.set,
+    rep: attempt.repInSet,
+    globalRep: attempt.index,
+    clean: !!attempt.clean,
+    accurate: attempt.accurate ?? check.accurate,
+    accuracyPct: attempt.accuracyPct ?? check.accuracyPct,
+    hasMajor: attempt.hasMajor ?? check.hasMajor,
+    hasMinor: attempt.hasMinor ?? check.hasMinor,
+    score: attempt.score,
+    romPct: attempt.romPct,
+    primaryIssue: attempt.primaryIssue || null,
+    mistakesMade: check.mistakesMade,
+    mistakesNotMade: check.mistakesNotMade,
+  };
+}
+
+/** Full-session JSON: glossary once at top, then every rep (keys only). */
+export function buildSessionMistakeReport(attempts = [], meta = {}) {
+  const list = attempts || [];
+  const counted = list.filter((a) => a.counted);
+  const perfect = list.filter((a) => a.clean || classifyIssues(a.issues).perfect);
+  const accurate = list.filter((a) => (a.accurate != null ? a.accurate : classifyIssues(a.issues).accurate));
+  const minorOnly = list.filter((a) => {
+    const c = a.hasMajor != null
+      ? { hasMajor: a.hasMajor, hasMinor: a.hasMinor }
+      : classifyIssues(a.issues);
+    return c.hasMinor && !c.hasMajor;
+  });
+  const major = list.filter((a) => (a.hasMajor != null ? a.hasMajor : classifyIssues(a.issues).hasMajor));
+  return {
+    mistakes: mistakeMeanings(),
+    setsCompleted: meta.setsCompleted ?? null,
+    targetSets: meta.targetSets ?? null,
+    targetReps: meta.targetReps ?? null,
+    repsCompleted: counted.length,
+    cleanReps: perfect.length,
+    perfectReps: perfect.length,
+    accurateReps: accurate.length,
+    minorOnlyReps: minorOnly.length,
+    majorReps: major.length,
+    formScore: meta.formScore ?? null,
+    accuracy: meta.accuracy ?? null,
+    reps: list.map((a) => buildRepMistakeReport(a)),
+  };
+}
+
 /**
  * Cumulative session metrics over every attempt (all sets). Pure — safe to
  * call at any time, including after an early Stop.
@@ -395,8 +575,24 @@ export function summarizeLateralRaise(attempts, {
   const list = attempts || [];
   const n = list.length;
   const counted = list.filter((a) => a.counted);
-  const clean = list.filter((a) => a.clean);
-  const has = (k) => list.filter((a) => a.issues.includes(k)).length;
+  const classified = list.map((a) => {
+    const c = classifyIssues(a.issues || []);
+    return {
+      perfect: c.perfect,
+      accurate: a.accurate != null ? !!a.accurate : c.accurate,
+      accuracyPct: a.accuracyPct != null ? a.accuracyPct : c.accuracyPct,
+      hasMajor: a.hasMajor != null ? !!a.hasMajor : c.hasMajor,
+      hasMinor: a.hasMinor != null ? !!a.hasMinor : c.hasMinor,
+    };
+  });
+  const baseIdx = counted.length
+    ? list.map((a, i) => (a.counted ? i : -1)).filter((i) => i >= 0)
+    : list.map((_, i) => i);
+  const perfectReps = baseIdx.filter((i) => classified[i].perfect).length;
+  const accurateReps = baseIdx.filter((i) => classified[i].accurate).length;
+  const minorOnlyReps = baseIdx.filter((i) => classified[i].hasMinor && !classified[i].hasMajor).length;
+  const majorReps = baseIdx.filter((i) => classified[i].hasMajor).length;
+  const has = (k) => list.filter((a) => (a.issues || []).includes(k)).length;
 
   let best = null;
   let worst = null;
@@ -406,13 +602,26 @@ export function summarizeLateralRaise(attempts, {
   }
   const r = (v) => (v == null ? null : Math.round(v));
   const formScore = r(avg(list.map((a) => a.score)));
-  const accuracy = n ? Math.round((clean.length / n) * 100) : null;
+  const repsDone = baseIdx.length;
+  // Continuous accuracy: average of per-rep (weighted checks passed / total).
+  // Falls back to recomputing from issues so older attempt blobs still work.
+  const accuracy = repsDone
+    ? Math.round(avg(baseIdx.map((i) => {
+      const a = list[i];
+      if (a.accuracyPct != null) return a.accuracyPct;
+      return classified[i].accuracyPct;
+    })))
+    : 0;
   const rom = r(avg(list.map((a) => a.romPct)));
 
   return {
     attempts: n,
     repsCompleted: counted.length,
-    cleanReps: clean.length,
+    cleanReps: perfectReps,
+    perfectReps,
+    accurateReps,
+    minorOnlyReps,
+    majorReps,
     setsCompleted,
     targetSets,
     targetReps,
@@ -437,16 +646,24 @@ export function summarizeLateralRaise(attempts, {
       outOfSync: has('lr_arms_out_of_sync'),
       shoulderTilt: has('lr_shoulder_tilt'),
     },
-    perRep: list.map((a) => ({
+    perRep: list.map((a, i) => ({
       attempt: a.attempt,
       rep: a.index,
       set: a.set,
       counted: a.counted,
-      clean: a.clean,
+      clean: a.clean != null ? a.clean : classified[i].perfect,
+      accurate: classified[i].accurate,
+      accuracyPct: Math.round(classified[i].accuracyPct),
+      hasMajor: classified[i].hasMajor,
+      hasMinor: classified[i].hasMinor,
       score: a.score,
       romPct: a.romPct,
       issues: a.issues,
+      ...mistakeChecklist(a.issues),
     })),
+    mistakeReport: buildSessionMistakeReport(list, {
+      setsCompleted, targetSets, targetReps, formScore, accuracy,
+    }),
     summaryLine: n
       ? `Form Score ${formScore}/100, Accuracy ${accuracy}%, Range of Motion ${rom}%`
       : 'No reps recorded',

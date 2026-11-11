@@ -30,7 +30,7 @@ const WARN_REASONS = ['lr_turned_away', 'lr_out_of_frame'];
 
 export function drawShoulderLine(ctx, g, calib, mirrored, h) {
   if (!g) return;
-  const L = raiseLines(g);
+  const L = raiseLines(g, calib);
   const n = g.norm;
   const xs = [g.ls.x, g.rs.x];
   for (const a of [g.left, g.right]) if (a.ok) xs.push(a.elbow.x, a.wrist.x);
@@ -45,6 +45,9 @@ export function drawShoulderLine(ctx, g, calib, mirrored, h) {
   // An arm is "in" only when its elbow AND wrist are both inside the band.
   const inCount = arms.filter((a) => inBand(a.elbow.y) && inBand(a.wrist.y)).length;
   const lineColor = inCount === 2 ? GREEN : inCount === 1 ? AMBER : CYAN;
+  // Count line: both elbows at/above COUNT → rep counts (may still be partial).
+  const pastCount = arms.filter((a) => a.elbow.y <= L.countMinY).length;
+  const countColor = pastCount === 2 ? GREEN : pastCount === 1 ? AMBER : 'rgba(255,190,0,0.9)';
 
   ctx.save();
 
@@ -60,6 +63,14 @@ export function drawShoulderLine(ctx, g, calib, mirrored, h) {
   const bandLabel = { size: size - 1, align: 'right' };
   label(ctx, 'UPPER', bandLabelX, L.bandTopY - 4, mirrored, elbowOver ? RED : CYAN, bandLabel);
   label(ctx, 'LOWER', bandLabelX, L.bandBottomY + size, mirrored, CYAN, bandLabel);
+
+  // Partial-rep COUNT line (below the shoulder band).
+  ctx.lineWidth = 2;
+  ctx.setLineDash([8, 6]);
+  ctx.strokeStyle = countColor;
+  line(ctx, x0, L.countMinY, x1, L.countMinY);
+  ctx.setLineDash([]);
+  label(ctx, 'COUNT', bandLabelX, L.countMinY + size, mirrored, countColor, bandLabel);
 
   // The shoulder line itself.
   ctx.lineWidth = 3;
@@ -129,7 +140,7 @@ export function drawDebugReadout(ctx, fr, w, h, mirrored) {
     `shoulderY ${g ? g.shY.toFixed(0) : '—'}px  norm ${g ? g.norm.toFixed(0) : '—'}px`,
     `L elbowDy ${f(g?.left.elbowDy)} wristDy ${f(g?.left.wristDy)} ${fr.armStates.left}`,
     `R elbowDy ${f(g?.right.elbowDy)} wristDy ${f(g?.right.wristDy)} ${fr.armStates.right}`,
-    `band −${LR_CFG.elbow_above_tolerance}…+${LR_CFG.top_tolerance}`,
+    `band −${LR_CFG.elbow_above_tolerance}…+${LR_CFG.top_tolerance}  count≥${LR_CFG.count_min_lift}`,
     `L−R elbow ${f(g?.left.ok && g?.right.ok ? Math.abs(g.left.elbowDy - g.right.elbowDy) : null)}/${LR_CFG.symmetry_max}`
       + `  wrist ${f(g?.left.ok && g?.right.ok ? Math.abs(g.left.wristDy - g.right.wristDy) : null)}/${LR_CFG.symmetry_wrist_max}`,
   ];

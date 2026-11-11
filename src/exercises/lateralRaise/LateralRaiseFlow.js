@@ -5,7 +5,7 @@
 //                        → calibration (shoulder width, resting elbow / wrist
 //                        height, shoulder tilt baseline)
 //   READY              — short settle (lets the stance voice line finish)
-//   ACTIVE             — rep counting per set; says "Rep N" after each rep
+//   ACTIVE             — peak: "Rep N"; arms-down: optional mistake cue
 //   REST_BETWEEN_SETS  — not scored; resumes via continueNextSet() or
 //                        automatically once back in stance after the rest time
 //   COMPLETE           — all sets done, or finish() (Stop) was called
@@ -14,17 +14,30 @@
 // turned away, out of frame) never counts toward active time or any metric.
 
 import { VoiceManager } from '../../core/voiceManager.js';
+import { speech } from '../../core/speechSynth.js';
 import { primeSetIntro } from '../../core/sessionVoice.js';
 import { nowSec } from '../../core/landmarks.js';
 import {
   LR_CFG, LR_FEEDBACK, LR_VOICE_MSG, LR_STANCE_PRIORITY, LR_ISSUE_PRIORITY, LR_TRACKED_LANDMARKS,
-  LR_COLOR_GREEN, LR_COLOR_AMBER, LR_COLOR_RED, LR_COLOR_GREY,
+  LR_COLOR_GREEN, LR_COLOR_AMBER, LR_COLOR_RED, LR_COLOR_GREY, LR_LIVE_VOICE, repCountText,
 } from './config.js';
 import { LandmarkSmoother } from '../common/landmarkSmoother.js';
 import { RepeatMistakeGate } from '../common/repeatMistakeGate.js';
 import { firstByPriority, median, clamp, fmt } from '../common/math.js';
 import { buildGeometry, evaluateStance, facingRatio, armLift } from './poseChecks.js';
-import { LateralRaiseRepTracker, summarizeLateralRaise } from './LateralRaiseRepTracker.js';
+import {
+  LateralRaiseRepTracker,
+  summarizeLateralRaise,
+  buildRepMistakeReport,
+  buildSessionMistakeReport,
+} from './LateralRaiseRepTracker.js';
+import {
+  createLiveVoiceState,
+  markLiveVoiceSpoken,
+  advanceLiveVoiceStreaks,
+  pickLiveVoiceCue,
+  decrementLiveVoiceCooldowns,
+} from './liveVoice.js';
 
 export const LR_PHASE = {
   SETUP_STANCE: 'lr_setup_stance',
@@ -52,6 +65,9 @@ export class LateralRaiseFlow {
   constructor({ targetReps = 10, targetSets = 3, restSeconds = null, voice = true, setNumber = 1, setIntro = false, targetSeconds = 0 } = {}) {
     this._voiceEnabled = voice !== false;
     this._voice = new VoiceManager();
+    this._speech = speech; // Web Speech module (overridable in tests)
+    this._speech.configure({ lang: LR_LIVE_VOICE.VOICE_LANG, rate: LR_LIVE_VOICE.SPEECH_RATE });
+    this._webCooldowns = {};
     this._targetReps = targetReps > 0 ? targetReps : 0;
     this._targetSets = targetSets > 0 ? targetSets : (this._targetReps > 0 ? 1 : 0);
     this._restSec = restSeconds > 0 ? restSeconds : null;
@@ -101,6 +117,10 @@ export class LateralRaiseFlow {
     this._banner = '';
     this._bannerUntil = -1;
 
+    // Live voice: session-scoped (not reset between sets).
+    this._liveVoice = createLiveVoiceState(LR_LIVE_VOICE);
+    this._pendingCue = null; // { cueKey, text } waiting / playing; dropped by next peak
+
     this._stoppedEarly = false;
     this._stoppedInPhase = null;
     this._final = null;
@@ -108,21 +128,40 @@ export class LateralRaiseFlow {
     this._debugHeaderSent = false;
   }
 
-  // ── Voice helpers ────────────────────────────────────────────────────────
-  _speak(text, opts) {
+  // -- Voice helpers --------------------------------------------------------
+  // Voice routing. All speech is generated in the browser (Web Speech, Indian
+  // English preferred) so nothing waits on the backend:
+  //   - counts  -> priority 'count' (never skipped, interrupt any cue)
+  //   - cues / praise / instructions -> priority 'cue' (one pending, dropped by a count)
+  // If Web Speech is unavailable, everything falls back to VoiceManager.
+  _useWebSpeech() {
+    return LR_LIVE_VOICE.USE_WEB_SPEECH && this._speech.isSupported();
+  }
+
+  _speak(text, opts = {}) {
     if (!this._voiceEnabled || !text) return false;
+    if (this._useWebSpeech()) {
+      return this._speech.speak(text, { priority: opts.priority || 'cue', onEnd: opts.onEnd });
+    }
     return this._voice.speak(text, opts);
   }
 
-  _speakQueued(text, opts) {
+  _speakQueued(text, opts = {}) {
     if (!this._voiceEnabled || !text) return false;
+    if (this._useWebSpeech()) return this._speech.speak(text, { priority: 'cue' });
     return this._voice.speakQueued(text, opts);
   }
 
   _voiceBusy() {
-    return this._voiceEnabled && this._voice.isBusy();
+    if (!this._voiceEnabled) return false;
+    return this._useWebSpeech() ? this._speech.isSpeaking() : this._voice.isBusy();
   }
 
+  /** Stop any cue/instruction audio. Rep counts are never cancelled. */
+  _stopCue() {
+    if (this._useWebSpeech()) this._speech.stopCue();
+    else this._voice.cancel();
+  }
   /** Debounce, say once per key, then give the user time to correct. */
   _maybeIssueInstruction(key, now) {
     if (!key) {
@@ -201,11 +240,143 @@ export class LateralRaiseFlow {
     if (this._phase !== LR_PHASE.COMPLETE) {
       this._stoppedEarly = true;
       this._stoppedInPhase = this._phase;
+      // Peak counted but not yet lowered → finalize with data so far.
+      if (this._rep.hasOpenRep) {
+        const attempt = this._rep.finalizeOpenRep(this._calib, nowSec());
+        if (attempt) this._onAttempt(attempt, nowSec());
+      }
+      this._pendingCue = null;
       this._rep.abortInProgress();
       this._phase = LR_PHASE.COMPLETE;
       this._final = this.summary();
+      this._logSessionMistakes(this._final, 'early_stop');
     }
     return this._final || this.summary();
+  }
+
+  /** Peak always wins: drop any pending mistake cue without keeping its cooldown. */
+  _announceRepCount(peak) {
+    this._dropPendingCue();
+    this._stopCue();
+    this._speak(repCountText(peak.repInSet), {
+      key: `lr_rep_${this._currentSet}_${peak.repInSet}`,
+      cooldownMs: 0,
+      immediate: true,
+      priority: 'count',
+    });
+  }
+
+  _logVoiceDecision(attempt, { cueKey, cue, praise, advanced }) {
+    if (!LR_LIVE_VOICE.debug_voice) return;
+    const made = attempt.issues || [];
+    const never = made.filter((k) => LR_LIVE_VOICE.NEVER_SPEAK.includes(k));
+    const speakable = made.filter((k) => LR_LIVE_VOICE.PRIORITY.includes(k));
+    const streaks = {};
+    for (const k of LR_LIVE_VOICE.PRIORITY) {
+      const e = advanced.byKey?.[k];
+      if (e && (e.streak > 0 || e.cooldownRepsLeft > 0)) {
+        streaks[k] = { streak: e.streak, cooldown: e.cooldownRepsLeft };
+      }
+    }
+    let reason = 'none';
+    if (cueKey) reason = `speak:${cueKey}`;
+    else if (praise) reason = 'praise';
+    else if (!speakable.length && never.length) reason = `silent_never_speak:${never.join(',')}`;
+    else if (speakable.length) reason = 'waiting_streak_or_cooldown';
+    // eslint-disable-next-line no-console
+    console.log(`[LR] voice rep ${attempt.repInSet}`, { made, speakable, never, streaks, reason, cue, praise });
+  }
+
+  /**
+   * After arms-down finalization: at most one mistake cue (or praise).
+   * Cue is a separate utterance — rep count was already said at the peak.
+   */
+  _speakPostRepCue(attempt) {
+    const cfg = LR_LIVE_VOICE;
+    let advanced = advanceLiveVoiceStreaks(attempt.issues || [], this._liveVoice, cfg);
+    const cueKey = pickLiveVoiceCue(advanced, cfg);
+    const cue = cueKey ? (cfg.CUE_TEXT[cueKey] || null) : null;
+
+    let praise = null;
+    if (!cue && cfg.PRAISE_ENABLED && !(attempt.issues || []).length) {
+      const n = (advanced.perfectSincePraise || 0) + 1;
+      const every = Math.max(1, cfg.PRAISE_EVERY_PERFECT || 3);
+      if (n >= every) {
+        praise = cfg.PRAISE_TEXT;
+        advanced = { ...advanced, perfectSincePraise: 0 };
+      } else {
+        advanced = { ...advanced, perfectSincePraise: n };
+      }
+    } else {
+      advanced = { ...advanced, perfectSincePraise: 0 };
+    }
+
+    this._logVoiceDecision(attempt, { cueKey, cue, praise, advanced });
+
+    const streakSnap = cueKey && advanced.byKey[cueKey]
+      ? { streak: advanced.byKey[cueKey].streak, cooldownRepsLeft: advanced.byKey[cueKey].cooldownRepsLeft }
+      : null;
+
+    let next = advanced;
+    if (cueKey) next = markLiveVoiceSpoken(next, cueKey, cfg);
+    next = decrementLiveVoiceCooldowns(next, { skipKeys: cueKey ? [cueKey] : [] });
+    this._liveVoice = next;
+
+    const text = cue || praise;
+    if (!text) {
+      this._pendingCue = null;
+      return;
+    }
+
+    const pending = {
+      cueKey: cue ? cueKey : null,
+      text,
+      isPraise: !cue,
+      streakSnap,
+    };
+    this._pendingCue = pending;
+    // Once the cue was fully heard it is no longer "droppable": a later peak must
+    // not undo its cooldown. Only an unheard cue is dropped by _announceRepCount().
+    this._speak(text, {
+      key: cue ? `lr_cue_${cueKey}` : 'lr_praise',
+      cooldownMs: 0,
+      priority: 'cue',
+      onEnd: () => { if (this._pendingCue === pending) this._pendingCue = null; },
+    });
+  }
+
+  _dropPendingCue() {
+    if (!this._pendingCue) return;
+    // Undo cooldown / streak reset — dropped cue must not start cooldown; keep streak.
+    const { cueKey, streakSnap } = this._pendingCue;
+    if (cueKey && streakSnap && this._liveVoice.byKey?.[cueKey]) {
+      this._liveVoice.byKey[cueKey].streak = streakSnap.streak;
+      this._liveVoice.byKey[cueKey].cooldownRepsLeft = streakSnap.cooldownRepsLeft;
+    }
+    this._pendingCue = null;
+  }
+
+  _logRepMistakes(attempt) {
+    if (!LR_CFG.log_rep_mistakes || !attempt) return;
+    const report = buildRepMistakeReport(attempt);
+    // eslint-disable-next-line no-console
+    console.log(
+      `[LR] Rep ${report.set}.${report.rep} mistakes`,
+      report,
+    );
+  }
+
+  _logSessionMistakes(summary, reason = 'complete') {
+    if (!LR_CFG.log_rep_mistakes) return;
+    const report = summary?.mistakeReport
+      || buildSessionMistakeReport(this._rep.attempts, {
+        setsCompleted: this._setsCompleted,
+        targetSets: this._targetSets,
+        targetReps: this._targetReps,
+        formScore: summary?.formScore ?? null,
+      });
+    // eslint-disable-next-line no-console
+    console.log(`[LR] Session mistakes (${reason})`, report);
   }
 
   summary() {
@@ -423,7 +594,13 @@ export class LateralRaiseFlow {
     const rep = this._rep;
 
     if (!g) {
-      if (lostLong) rep.abortInProgress();
+      if (lostLong) {
+        if (rep.hasOpenRep) {
+          const attempt = rep.finalizeOpenRep(this._calib, now);
+          if (attempt) this._onAttempt(attempt, now);
+        }
+        rep.abortInProgress();
+      }
       this._setActivity(false, 'lr_out_of_frame', now);
       return this._result(g, now, {
         status: LR_FEEDBACK.lr_out_of_frame, statusKind: 'warn',
@@ -433,6 +610,10 @@ export class LateralRaiseFlow {
     }
 
     if (facingRatio(g, this._calib) < LR_CFG.turn_ratio) {
+      if (rep.hasOpenRep) {
+        const attempt = rep.finalizeOpenRep(this._calib, now);
+        if (attempt) this._onAttempt(attempt, now);
+      }
       rep.abortInProgress();
       this._setActivity(false, 'lr_turned_away', now);
       return this._result(g, now, {
@@ -443,11 +624,15 @@ export class LateralRaiseFlow {
     }
 
     const res = rep.update(g, this._calib, now);
-    if (rep.inProgress) this._lastMoveAt = now;
+    if (rep.inProgress || res.peakCounted) this._lastMoveAt = now;
     this._mistakeGate.track(rep.inProgress);
-    const exercising = rep.inProgress || now - this._lastMoveAt <= LR_CFG.idle_seconds;
+    const exercising = rep.inProgress || !!this._rep.hasOpenRep
+      || now - this._lastMoveAt <= LR_CFG.idle_seconds;
     this._setActivity(exercising, exercising ? 'lr_rep_in_progress' : 'lr_arms_resting', now);
     if (exercising) this._activeSec += dt;
+
+    // Peak: announce "Rep N" immediately (cancels any pending mistake cue).
+    if (res.peakCounted) this._announceRepCount(res.peakCounted);
 
     const sustained = rep.inProgress ? this._sustained(res.liveKeys, now) : this._sustained([], now);
     const shownLive = this._mistakeGate.filter(sustained);
@@ -455,7 +640,7 @@ export class LateralRaiseFlow {
     if (primaryLive) {
       this._setFeedback(LR_FEEDBACK[primaryLive], now, 1.0);
       this._setMistake(primaryLive, now, LIVE_MISTAKE_HOLD_SEC);
-    } else if (res.topSides.length && !this._currentFeedback(now)) {
+    } else if ((res.topSides.length || res.peakCounted) && !this._currentFeedback(now)) {
       this._setFeedback('Top reached — lower with control', now, 1.0);
     }
 
@@ -503,10 +688,8 @@ export class LateralRaiseFlow {
     const issue = this._mistakeGate.endRep(a.issues)[0] || null;
     const setDone = this._targetReps > 0 && rep.setCount >= this._targetReps;
 
-    // The count is the only thing lateral raise ever says during the workout.
-    this._speak(`Rep ${a.repInSet}`, {
-      key: `lr_rep_${this._currentSet}_${a.repInSet}`, cooldownMs: 0, immediate: true,
-    });
+    // Rep count was already spoken at the peak — only a cue/praise here.
+    this._speakPostRepCue(a);
 
     const setPart = this._targetSets > 0 ? `Set ${this._currentSet} of ${this._targetSets}, ` : '';
     const repPart = this._targetReps > 0 ? `Rep ${a.repInSet} of ${this._targetReps}` : `Rep ${a.repInSet}`;
@@ -514,6 +697,7 @@ export class LateralRaiseFlow {
     if (issue) this._setFeedback(LR_FEEDBACK[issue], now);
     else if (!a.issues.length) this._setFeedback('Good rep!', now);
     if (issue) this._setMistake(issue, now, REP_MISTAKE_HOLD_SEC);
+    this._logRepMistakes(a);
     return setDone;
   }
 
@@ -525,6 +709,7 @@ export class LateralRaiseFlow {
     if (finished) {
       this._phase = LR_PHASE.COMPLETE;
       this._final = this.summary();
+      this._logSessionMistakes(this._final, 'all_sets_complete');
       this._setBanner('All sets complete!', now, 60);
       return this._result(g, now, {
         status: 'All sets complete!', statusKind: 'ok',
@@ -614,8 +799,12 @@ export class LateralRaiseFlow {
 
   reset() {
     this._voice.cancel();
+    this._speech.stopCue();
+    this._webCooldowns = {};
     this._voice.resetCooldowns();
     this._rep = new LateralRaiseRepTracker();
     this._resetState();
+    this._liveVoice = createLiveVoiceState(LR_LIVE_VOICE);
+    this._pendingCue = null;
   }
 }

@@ -61,8 +61,10 @@ export const LR_CFG_DEFAULTS = {
   elbow_above_tolerance: 0.12, // UPPER line: this far ABOVE the shoulder line
   // Fixed rep-cycle internals (not user tunable).
   // Lift fraction: 0 = calibrated resting elbow height, 1 = elbow on the line.
-  // Elbow height follows 1 − cos(arm raise), so 0.25 ≈ 40°, 0.35 ≈ 50°.
-  lift_start: 0.25, // arm has left the start zone (rep begins) — every cycle past this counts as a rep
+  // Elbow height follows 1 − cos(arm raise), so 0.25 ≈ 40°, 0.35 ≈ 50°, 0.55 ≈ 63°.
+  lift_start: 0.25, // arm has left the start zone (rep begins)
+  // Both elbows past this → COUNT (partial OK). Full stretch still needs the band.
+  count_min_lift: 0.55,
   lift_return: 0.15, // arm is back in the start zone (hysteresis vs lift_start; blocks double counting)
   pair_window_sec: 0.7, // both arms must finish their cycles this close together
   max_cycle_sec: 10, // an arm stuck mid-rep this long without reaching the top is reset
@@ -106,7 +108,77 @@ export const LR_CFG_DEFAULTS = {
   // ── Debug ────────────────────────────────────────────────────────────────
   debug: false, // console per-frame values + on-canvas readout
   debug_log_every_n: 1, // log every Nth frame
+  // After each rep + at session end, print JSON of mistakes made / not made.
+  log_rep_mistakes: true,
+
 };
+
+/** Live voice coaching — edit cues / priority / cooldowns here only. */
+export const LR_LIVE_VOICE = {
+  /** Highest priority first. Only these may be spoken mid-workout. */
+  PRIORITY: [
+    'lr_elbow_too_high',
+    'lr_not_high_enough',
+    'lr_asymmetry',
+    'lr_arms_out_of_sync',
+    'lr_shoulder_tilt',
+    'lr_wrist_not_high_enough',
+    'lr_wrist_too_high',
+  ],
+  /** Recorded in JSON / summary, never spoken live. */
+  NEVER_SPEAK: [
+    'lr_incomplete',
+  ],
+  REQUIRED_CONSECUTIVE: 2,
+  COOLDOWN_REPS: 3,
+  /** Very short English cues. */
+  CUE_TEXT: {
+    lr_elbow_too_high: 'Lower your arms',
+    lr_not_high_enough: 'Full stretch',
+    lr_asymmetry: 'Keep arms level',
+    lr_arms_out_of_sync: 'Lift together',
+    lr_shoulder_tilt: 'Relax shoulders',
+    lr_wrist_not_high_enough: 'Raise wrists',
+    lr_wrist_too_high: 'Lower your wrists',
+  },
+  PRAISE_ENABLED: true,
+  PRAISE_TEXT: 'Good rep',
+  /** Speak praise at most once every N perfect reps. */
+  PRAISE_EVERY_PERFECT: 3,
+
+  // ── Rep count at the peak ──────────────────────────────────────────────
+  /** 'number' → "One", "Two", … ; 'rep' → "Rep 1", "Rep 2", … */
+  REP_COUNT_STYLE: 'number',
+  /**
+   * Count when both elbows reach this lift fraction (partial reps count).
+   * Full stretch / clean still requires the shoulder band (`top_tolerance`).
+   */
+  get VALID_THRESHOLD() { return LR_CFG.count_min_lift; },
+  /** Both elbows must hold the count line this many consecutive frames. */
+  VALID_FRAMES: 2,
+  /** Unlock for the next rep once both elbows are back under this lift fraction. */
+  RESET_THRESHOLD: 0.15,
+
+  // ── Speech engine ──────────────────────────────────────────────────────
+  /** Speak through window.speechSynthesis (falls back to VoiceManager if unsupported). */
+  USE_WEB_SPEECH: true,
+  VOICE_LANG: 'en-IN', // Indian English; falls back to en-US / en-GB / any English
+  SPEECH_RATE: 1.1,
+  /** Console-log cue decisions (selected / skipped reason). */
+  debug_voice: true,
+};
+
+const NUMBER_WORDS = [
+  'Zero', 'One', 'Two', 'Three', 'Four', 'Five', 'Six', 'Seven', 'Eight', 'Nine', 'Ten',
+  'Eleven', 'Twelve', 'Thirteen', 'Fourteen', 'Fifteen', 'Sixteen', 'Seventeen', 'Eighteen',
+  'Nineteen', 'Twenty',
+];
+
+/** Spoken rep count text for rep number `n` (per-set number), per REP_COUNT_STYLE. */
+export function repCountText(n, style = LR_LIVE_VOICE.REP_COUNT_STYLE) {
+  if (style === 'rep') return `Rep ${n}`;
+  return NUMBER_WORDS[n] || String(n);
+}
 
 /** Live mutable config — tolerance sliders write here directly. */
 export const LR_CFG = { ...LR_CFG_DEFAULTS };
@@ -165,7 +237,7 @@ export const LR_FEEDBACK = {
   lr_stance_ok: 'Your stance is correct. Start the exercise.',
 
   lr_incomplete: 'Incomplete rep — raise both arms together',
-  lr_not_high_enough: 'Raise your elbows up to the shoulder line',
+  lr_not_high_enough: 'Partial rep — raise to the shoulder line (full stretch)',
   lr_elbow_too_high: 'Elbows too high — stop at shoulder level',
   lr_wrist_not_high_enough: 'Half rep — raise your wrists up to the shoulder line',
   lr_wrist_too_high: 'Wrists too high — keep them at shoulder level',
@@ -177,6 +249,108 @@ export const LR_FEEDBACK = {
   lr_out_of_frame: 'Out of frame',
   lr_long_idle: 'Paused — start your next rep or press Stop',
 };
+
+/** Short plain-English meanings for console / JSON mistake reports. */
+export const LR_ISSUE_MEANING = {
+  lr_incomplete: 'Rep did not finish properly (one arm missing, lost mid-rep, or both arms never completed together).',
+  lr_not_high_enough: 'Partial rep — elbows cleared the count line but never reached the shoulder band (not a full stretch).',
+  lr_wrist_not_high_enough: 'Elbows OK, but wrists stayed below the shoulder line (half / soft top).',
+  lr_elbow_too_high: 'Elbows went above the shoulder band (overshoot).',
+  lr_wrist_too_high: 'Wrists went above the shoulder band (overshoot).',
+  lr_arms_out_of_sync: 'One arm started or finished later than the other.',
+  lr_asymmetry: 'Left and right arms not level (uneven height).',
+  lr_shoulder_tilt: 'Shoulders tilted or shrugged during the raise.',
+};
+
+/**
+ * Severity for accuracy. Edit this map only.
+ * Keys listed as "minor" use MINOR_PENALTY_MULTIPLIER; anything else
+ * (including unknown keys) uses PENALTY_MULTIPLIER.
+ */
+export const LR_ISSUE_SEVERITY = {
+  // MINOR — small form tips; lighter penalty
+  lr_wrist_too_high: 'minor',
+  lr_shoulder_tilt: 'minor',
+  // MAJOR — full penalty multiplier
+  lr_incomplete: 'major',
+  lr_not_high_enough: 'major',
+  lr_elbow_too_high: 'major',
+  lr_arms_out_of_sync: 'major',
+  lr_asymmetry: 'major',
+  // lr_wrist_not_high_enough intentionally omitted → defaults to major
+};
+
+/**
+ * Mistake keys that add penalty to continuous accuracy.
+ * `lr_incomplete` is skipped — it is usually a consequence of other flags
+ * and would double-count the same root cause.
+ */
+export const LR_ACCURACY_CHECKS = LR_ISSUE_PRIORITY.filter((k) => k !== 'lr_incomplete');
+
+/**
+ * Strict continuous accuracy.
+ * base = 100 / TOTAL_CHECKS (8 types → 12.5% each).
+ * major penalty = PENALTY_MULTIPLIER × base (default 2 → 25%).
+ * minor penalty = MINOR_PENALTY_MULTIPLIER × base (default 1 → 12.5%).
+ * Tune multipliers here if accuracy feels too harsh / soft.
+ */
+export const LR_ACCURACY = {
+  /** Denominator slots — all issue types including incomplete. */
+  TOTAL_CHECKS: LR_ISSUE_PRIORITY.length,
+  /** Major mistake multiplier (try 1.5 / 2 / 3). */
+  PENALTY_MULTIPLIER: 2,
+  /** Minor mistake multiplier (lighter than major). */
+  MINOR_PENALTY_MULTIPLIER: 1,
+};
+
+/** @returns {'minor'|'major'} */
+export function issueSeverity(key) {
+  return LR_ISSUE_SEVERITY[key] === 'minor' ? 'minor' : 'major';
+}
+
+/** Penalty multiplier for one flagged check key. */
+export function accuracyPenaltyMultiplier(key) {
+  return issueSeverity(key) === 'minor'
+    ? LR_ACCURACY.MINOR_PENALTY_MULTIPLIER
+    : LR_ACCURACY.PENALTY_MULTIPLIER;
+}
+
+/** Percent deducted for one flagged check (before clamp). */
+export function accuracyPenaltyPctForKey(key) {
+  const total = LR_ACCURACY.TOTAL_CHECKS || LR_ISSUE_PRIORITY.length || 1;
+  return accuracyPenaltyMultiplier(key) * (100 / total);
+}
+
+/**
+ * Continuous per-rep accuracy (strict):
+ *   penalty = Σ (multiplier × 100 / TOTAL_CHECKS) for each flagged scored check
+ *   repAccuracy = max(0, 100 − penalty)
+ * Returns 0–100 (float; caller may round).
+ */
+export function repAccuracyPct(issues = []) {
+  const made = new Set(issues || []);
+  let penalty = 0;
+  for (const key of LR_ACCURACY_CHECKS) {
+    if (made.has(key)) penalty += accuracyPenaltyPctForKey(key);
+  }
+  return Math.max(0, Math.min(100, 100 - penalty));
+}
+
+/** Classify a rep's mistake keys for perfect / major / minor stats. */
+export function classifyIssues(issues = []) {
+  const list = issues || [];
+  const hasMajor = list.some((k) => issueSeverity(k) === 'major');
+  const hasMinor = list.some((k) => issueSeverity(k) === 'minor');
+  const accuracyPct = repAccuracyPct(list);
+  return {
+    hasMajor,
+    hasMinor,
+    perfect: list.length === 0,
+    // Binary "accurate" = no major mistakes (used for accurateReps count).
+    accurate: !hasMajor,
+    accuracyPct,
+  };
+}
 
 export const LR_VOICE_MSG = {
   setup_begin: 'Stand facing the camera with your feet shoulder width apart and your arms down at your sides.',

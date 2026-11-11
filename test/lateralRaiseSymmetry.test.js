@@ -59,7 +59,11 @@ describe('lateral raise symmetry', () => {
   });
 
   test('one arm clearly lower than the other → lr_asymmetry (live and at rep end)', () => {
-    const { attempt, live } = runRep(new LateralRaiseRepTracker(), 0, { rightScale: 0.75 });
+    // Both elbows must still reach the shoulder band to count at peak; keep the
+    // shortfall small enough to peak-count but large enough to flag asymmetry.
+    LR_CFG.symmetry_max = 0.05;
+    const { attempt, live } = runRep(new LateralRaiseRepTracker(), 0, { rightScale: 0.92 });
+    assert.ok(attempt, 'rep should be counted at peak');
     assert.ok(live.has('lr_asymmetry'));
     assert.ok(attempt.issues.includes('lr_asymmetry'));
     assert.ok(attempt.symmetryPct < 100);
@@ -104,7 +108,8 @@ describe('lateral raise symmetry', () => {
     const tr = new LateralRaiseRepTracker();
     let t = 0;
     t = runRep(tr, t).endAt;
-    t = runRep(tr, t, { rightScale: 0.75 }).endAt;
+    LR_CFG.symmetry_max = 0.05;
+    t = runRep(tr, t, { rightScale: 0.92 }).endAt;
     runRep(tr, t, { lag: 1.0 });
     assert.equal(tr.attempts.length, 3);
     const s = summarizeLateralRaise(tr.attempts);

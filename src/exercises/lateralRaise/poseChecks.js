@@ -125,12 +125,22 @@ export function armLevelDiff(g) {
   return { elbow, wrist, ratio };
 }
 
-/** Horizontal reference lines (pixel y) for the overlay. */
-export function raiseLines(g) {
+/**
+ * Horizontal reference lines (pixel y) for the overlay.
+ * `countMinY` uses the default rest-elbow height so the COUNT guide stays
+ * stable even before / without per-side calibration.
+ */
+export function raiseLines(g, calib = null) {
   const n = g.norm;
+  const restE = calib?.restElbow
+    ? ((calib.restElbow.left + calib.restElbow.right) / 2)
+    : LR_CFG.rest_elbow_default;
+  const countElbowDy = restE * (1 - LR_CFG.count_min_lift);
   return {
     shoulderY: g.shY,
     bandTopY: g.shY - LR_CFG.elbow_above_tolerance * n,
     bandBottomY: g.shY + LR_CFG.top_tolerance * n,
+    /** Partial-rep count line — both elbows above this → COUNT. */
+    countMinY: g.shY + countElbowDy * n,
   };
 }
