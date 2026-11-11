@@ -52,7 +52,7 @@ export const SUSTAIN_SEC = 1.0;
 /** Default ratio-based tolerance values (mutable at runtime via tolerance UI). */
 export const CFG_DEFAULTS = {
   // Stance-phase only: |ankleWidth - shoulderWidth| / shoulderWidth must be ≤ this.
-  shoulder_ankle_tolerance: 0.20,
+  shoulder_ankle_tolerance: 0.15, // tuned from live calibration
   shoulder_foot_align_ratio_max: 0.100,
   sf_left_inner_offset_ratio: 0.04,
   sf_left_outer_offset_ratio: 0.04,
@@ -65,7 +65,7 @@ export const CFG_DEFAULTS = {
   fi_right_inner_offset_ratio: 0.04,
   fi_right_outer_offset_ratio: 0.0001,
   fi_line_half_len_ratio: 0.02,
-  knee_align_ratio_max: 0.12,
+  knee_align_ratio_max: 0.145, // tuned from live calibration
   kn_left_inner_offset_ratio: 0.04,
   kn_left_outer_offset_ratio: 0.04,
   kn_right_inner_offset_ratio: 0.04,

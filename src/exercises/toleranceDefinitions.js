@@ -12,8 +12,8 @@ import { SR_CFG, SR_CFG_DEFAULTS, resetSingleArmDumbbellRowCfg } from './singleA
 import { LUNGE_CFG, LUNGE_CFG_DEFAULTS, resetLungeCfg } from './lunge/config.js';
 
 export const PUSHUP_CFG_DEFAULTS = {
-  wrist_align_ratio_max: 0.06,
-  elbow_align_ratio_max: 0.05,
+  wrist_align_ratio_max: 0.08, // tuned from live calibration
+  elbow_align_ratio_max: 0.07, // tuned from live calibration
   wrist_elbow_collinear_ratio_max: 0.06,
   knee_align_ratio_max: 0.12,
 };

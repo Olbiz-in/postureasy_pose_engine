@@ -52,7 +52,7 @@ export const DC_CFG_DEFAULTS = {
 
   // ── Stance check (SETUP_STANCE) — same rules as the lateral raise ────────
   stance_hold_sec: 1.0, // every check must pass continuously this long
-  stance_min: 0.8, // ankle distance / shoulder width
+  stance_min: 0.5, // ankle distance / shoulder width (tuned from live calibration)
   stance_max: 1.4,
   upright_lean_max: 0.25, // |shoulder-center x − hip-center x| / sw
   hip_above_ankle_min: 1.5, // (ankle y − hip y) / sw; smaller = crouching
@@ -62,8 +62,8 @@ export const DC_CFG_DEFAULTS = {
   arms_down_below_shoulder_min: null, // no alternative rule (arms must be fully down)
   // ── Reference lines / rep detection ──────────────────────────────────────
   line_mode: 'per_side', // 'per_side' (each arm vs its own shoulder) | 'average'
-  top_line_offset: 0.10, // × T below the shoulder: TOP TARGET LINE
-  top_tolerance: 0.08, // × T: wrist within this below the target line = TOP reached
+  top_line_offset: 0.085, // × T below the shoulder: TOP TARGET LINE (tuned)
+  top_tolerance: 0.075, // × T: wrist within this below the target line = TOP reached (tuned)
   upper_allowance: 0.10, // × SW above the shoulder: UPPER TOLERANCE LINE
   bottom_tolerance: 0.10, // × T: wrist within this of the resting level = fully extended
   curl_start: 0.25, // progress: the arm has left the bottom zone (rep begins)
@@ -89,7 +89,7 @@ export const DC_CFG_DEFAULTS = {
   elbow_flare_tolerance: 0.15, // × SW elbow moving outward (vs resting elbow–hip offset)
   sway_tolerance: 0.12, // × SW shoulder-center x drift during a rep
   lean_tolerance: 0.06, // fraction of torso length lost during a rep (leaning back / forward)
-  shrug_tolerance: 0.05, // × T shoulder rise relative to the hips during a rep
+  shrug_tolerance: 0.005, // × T shoulder rise relative to the hips during a rep (tuned)
   shoulder_tilt_max: 0.08, // × SW change of left/right shoulder y difference
   // Sway / lean / shrug are measured against the posture this long before the
   // rep started (the start of a momentum swing happens before curl_start).

@@ -49,6 +49,7 @@ export {
   DUMBBELL_CURL_TOLERANCE_GROUPS,
   SINGLE_ARM_DUMBBELL_ROW_TOLERANCE_GROUPS,
   LUNGE_TOLERANCE_GROUPS,
+  PUSHUP_CFG_DEFAULTS,
   getSquatToleranceConfig,
   getPushUpToleranceConfig,
   getShoulderPressToleranceConfig,

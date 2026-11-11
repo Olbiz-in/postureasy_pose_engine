@@ -13,7 +13,7 @@ export const PUSHUP_POSTURE_LM_INDICES = [11, 12, 13, 14, 15, 16, 19, 20];
 
 export const PUSHUP_CFG = {
   // Wrist alignment (shoulder-width normalised, outward-biased)
-  wrist_align_ratio_max: 0.06,
+  wrist_align_ratio_max: 0.08, // tuned from live calibration
   wrist_left_outward_bias_ratio: 0.07,
   wrist_right_outward_bias_ratio: 0.07,
   wrist_left_inner_offset_ratio: 0.04,
@@ -22,7 +22,7 @@ export const PUSHUP_CFG = {
   wrist_right_outer_offset_ratio: 0.12,
 
   // Elbow alignment (same outward-bias model)
-  elbow_align_ratio_max: 0.05,
+  elbow_align_ratio_max: 0.07, // tuned from live calibration
   elbow_left_outward_bias_ratio: 0.06,
   elbow_right_outward_bias_ratio: 0.06,
   elbow_left_inner_offset_ratio: 0.04,

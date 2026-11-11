@@ -45,7 +45,7 @@ export const LR_CFG_DEFAULTS = {
 
   // ── Stance check (SETUP_STANCE) ──────────────────────────────────────────
   stance_hold_sec: 1.0, // every check must pass continuously this long
-  stance_min: 0.8, // ankle distance / shoulder width
+  stance_min: 0.5, // ankle distance / shoulder width (tuned from live calibration)
   stance_max: 1.4,
   upright_lean_max: 0.25, // |shoulder-center x − hip-center x| / sw
   hip_above_ankle_min: 1.5, // (ankle y − hip y) / sw; smaller = crouching
@@ -57,7 +57,7 @@ export const LR_CFG_DEFAULTS = {
   // Target band around the shoulder line: a perfect rep puts BOTH the elbow
   // and the wrist between the LOWER line (reached the top) and the UPPER line
   // (not too high). The same two tolerances apply to elbow and wrist.
-  top_tolerance: 0.10, // LOWER line: this far BELOW the shoulder line
+  top_tolerance: 0.15, // LOWER line: this far BELOW the shoulder line (tuned)
   elbow_above_tolerance: 0.12, // UPPER line: this far ABOVE the shoulder line
   // Fixed rep-cycle internals (not user tunable).
   // Lift fraction: 0 = calibrated resting elbow height, 1 = elbow on the line.
@@ -80,7 +80,7 @@ export const LR_CFG_DEFAULTS = {
   // left and right wrists within `symmetry_wrist_max`. The wrist sits ~2× as far
   // from the shoulder, so the same arm-angle gap moves it ~2× as much.
   // `symmetry_max` is also checked on the peak elbow heights.
-  symmetry_max: 0.15,
+  symmetry_max: 0.11, // tuned from live calibration
   symmetry_wrist_max: 0.25,
   symmetry_min_sec: 0.25, // uneven this long inside a rep → flagged
   // Both arms must start (and finish) together: one arm moving alone for
@@ -95,8 +95,8 @@ export const LR_CFG_DEFAULTS = {
   clean_score_min: 75,
 
   // ── Activity detection ───────────────────────────────────────────────────
-  idle_seconds: 2.0, // arms resting this long → NOT DOING EXERCISE
-  turn_ratio: 0.6, // live sw / calibrated sw below this → turned away
+  idle_seconds: 2.8, // arms resting this long → NOT DOING EXERCISE (tuned)
+  turn_ratio: 0.54, // live sw / calibrated sw below this → turned away (tuned)
   long_idle_seconds: 30, // pause the session timer + show a hint
 
   // ── Flow timing ──────────────────────────────────────────────────────────
